@@ -1,0 +1,9 @@
+# filename | tags (comma) | custom fields (key=value;...)
+200809-FVP_front_01.jpg||
+200809-FVP_back_01.jpg||
+200809FVP_3.jpg||
+200809-ECB_omf_01.jpg||
+IMG_4471.jpg|200810-ECB|Shot Type=front
+IMG_4472.jpg||Style Number=200810;Color Code=ECB;Shot Type=back
+DSC_0001.jpg||
+waterlily_campaign_01.jpg|lifestyle|

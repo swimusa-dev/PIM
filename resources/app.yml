@@ -1,0 +1,65 @@
+# The Databricks App resource. Resources are bound to the app and injected as env vars (app.yaml valueFrom).
+resources:
+  apps:
+    pim_app:
+      name: swimusa-pim
+      description: "Swim USA PIM (Vitamin A first): product information management as a Databricks App"
+      source_code_path: ../
+      # compute_size is UNCONFIRMED on the compliance-profile workspace; PLT-00 step 1 records the answer.
+      # Uncomment once confirmed:
+      # compute_size: ${var.app_compute_size}
+      resources:
+        - name: lakebase
+          description: Lakebase instance holding PIM working data (ARC-02)
+          database:
+            instance_name: ${var.lakebase_instance}
+            database_name: pim
+            permission: CAN_CONNECT_AND_CREATE
+        - name: sql-warehouse
+          description: Warehouse for Delta reads
+          sql_warehouse:
+            id: ${var.sql_warehouse_id}
+            permission: CAN_USE
+        - name: air-api-key
+          description: Air DAM API key (GOV-05)
+          secret:
+            scope: ${var.secret_scope}
+            key: air-api-key
+            permission: READ
+        - name: shopify-read-token
+          description: Shopify Admin API token with read_products scope only (EXP-13 step 1)
+          secret:
+            scope: ${var.secret_scope}
+            key: shopify-read-token
+            permission: READ
+        - name: ingest-job
+          description: Style Master ingest job (IMP-09), ARC-04 "Can manage run"
+          job:
+            id: ${resources.jobs.pim_style_master_ingest.id}
+            permission: CAN_MANAGE_RUN
+        - name: air-poll-job
+          description: Air DAM poll and image match (IMG-01, IMG-03)
+          job:
+            id: ${resources.jobs.pim_air_poll.id}
+            permission: CAN_MANAGE_RUN
+        - name: package-job
+          description: Shopify update package generation (EXP-13)
+          job:
+            id: ${resources.jobs.pim_shopify_package.id}
+            permission: CAN_MANAGE_RUN
+        - name: history-job
+          description: Publish gold tables and value history to Delta (ARC-02, GOV-02)
+          job:
+            id: ${resources.jobs.pim_publish_history.id}
+            permission: CAN_MANAGE_RUN
+        - name: bootstrap-job
+          description: Alembic upgrade and seed load
+          job:
+            id: ${resources.jobs.pim_bootstrap.id}
+            permission: CAN_MANAGE_RUN
+      # OBO user authorization scopes (PLT-00 step 2). Enable on the app in the UI as well.
+      user_api_scopes:
+        - sql
+        - files.files
+        - serving.serving-endpoints
+        - iam.current-user:read

@@ -1,0 +1,21 @@
+# IMG-02 shot types and IMG-03 tier 1 filename patterns (regex with named groups style, color, shot, seq).
+shot_types:
+  - {code: front, label: Front, sort_order: 10}
+  - {code: back, label: Back, sort_order: 20}
+  - {code: side, label: Side, sort_order: 30}
+  - {code: detail, label: Detail, sort_order: 40}
+  - {code: on_model_front, label: On-model front, sort_order: 50}
+  - {code: on_model_back, label: On-model back, sort_order: 60}
+  - {code: flat_lay, label: Flat lay, sort_order: 70}
+  - {code: swatch, label: Swatch, sort_order: 80}
+  - {code: lifestyle, label: Lifestyle, sort_order: 90}
+
+filename_patterns:
+  - label: "style-color_shot_seq (200809-FVP_front_01.jpg)"
+    regex: '^(?P<style>[A-Za-z0-9]+)[-_](?P<color>[A-Za-z0-9]+)[-_](?P<shot>[A-Za-z]+)[-_]?(?P<seq>\d+)?\.(jpe?g|png|tiff?|webp)$'
+    priority: 10
+    shot_map: {front: front, f: front, back: back, b: back, side: side, det: detail, detail: detail, om: on_model_front, omf: on_model_front, omb: on_model_back, flat: flat_lay, sw: swatch, swatch: swatch, life: lifestyle, lifestyle: lifestyle}
+  - label: "stylecolor_seq (200809FVP_1.jpg), shot inferred from sequence"
+    regex: '^(?P<style>\d{6})(?P<color>[A-Za-z]{2,6})[-_](?P<seq>\d+)\.(jpe?g|png|tiff?|webp)$'
+    priority: 20
+    shot_map: {"1": front, "2": back, "3": side, "4": detail}

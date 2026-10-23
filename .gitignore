@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+backend/pim/static/assets/
+backend/pim/static/index.html
+
+# Local
+.env
+.env.local
+*.log
+.databricks/
+local_data/
+tests/_tmp/

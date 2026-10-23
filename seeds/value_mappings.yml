@@ -1,0 +1,16 @@
+# IMP-11 ERP raw value -> option code. Raw values are normalized (upper, collapsed spaces, punctuation stripped).
+value_mappings:
+  - {source: erp, list: closure, raw: ADJUSTABLE, option: adjustable}
+  - {source: erp, list: closure, raw: Adjustable, option: adjustable}
+  - {source: erp, list: closure, raw: HOOK & EYE, option: hook_eye}
+  - {source: erp, list: closure, raw: HOOK AND EYE, option: hook_eye}
+  - {source: erp, list: material_claim, raw: "Recycled Claim Standard (RCS)", option: rcs}
+  - {source: erp, list: material_claim, raw: "RECYCLED CLAIM STANDARD", option: rcs}
+  - {source: erp, list: material_claim, raw: "RCS", option: rcs}
+  - {source: erp, list: material_claim, raw: "Recycled Claim Std (RCS)", option: rcs}
+  - {source: erp, list: material_claim, raw: "GRS", option: grs}
+  - {source: erp, list: material_claim, raw: "GOTS", option: gots}
+  - {source: erp, list: material_claim, raw: "OCS", option: ocs}
+  - {source: erp, list: brand_classification, raw: NATIONAL BRAND, option: national_brand}
+  - {source: erp, list: brand_classification, raw: EXCLUSIVE BRAND, option: exclusive_brand}
+  - {source: erp, list: brand_classification, raw: PRIVATE LABEL, option: private_label}

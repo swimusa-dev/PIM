@@ -1,0 +1,50 @@
+# Declarative Automation Bundle (formerly Databricks Asset Bundles) for the PIM app [D26].
+# Deploy:  databricks bundle validate -t dev && databricks bundle deploy -t dev && databricks bundle run pim_app -t dev
+bundle:
+  name: swimusa-pim
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds the PIM schema and volumes
+    default: swim_data_whse
+  schema:
+    description: Schema for PIM Delta tables and volumes
+    default: pim
+  lakebase_instance:
+    description: Name of the Lakebase (managed Postgres) instance
+    default: pim-lakebase
+  sql_warehouse_id:
+    description: SQL warehouse used for Delta reads (Style Master ingest, history publish)
+  secret_scope:
+    description: Secret scope holding adapter credentials (GOV-05)
+    default: pim-secrets
+  app_compute_size:
+    description: Databricks App compute size (MEDIUM or LARGE); PLT-00 step 1 confirms LARGE on our workspace
+    default: MEDIUM
+
+sync:
+  exclude:
+    - .venv
+    - frontend/node_modules
+    - frontend/src
+    - tests
+    - .pytest_cache
+    - .ruff_cache
+    - local_data
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-REPLACE-ME.azuredatabricks.net
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-REPLACE-ME.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: REPLACE-WITH-SP-APPLICATION-ID
