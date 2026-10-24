@@ -516,3 +516,513 @@ export interface Telemetry {
   ai_spend: { period?: string; calls?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number; [key: string]: unknown };
   [key: string]: unknown;
 }
+
+// =====================================================================================
+// Phase 2 (docs/api-contract-phase2.md): imports, bulk actions, workflows, comments,
+// notifications, carryover, compare, rules.
+// =====================================================================================
+
+export type BatchStatus =
+  | "uploaded"
+  | "mapped"
+  | "validated"
+  | "matched"
+  | "reviewed"
+  | "committing"
+  | "committed"
+  | "failed"
+  | "rolled_back";
+export type MatchStatus = "matched" | "new" | "ambiguous" | "unmatched";
+export type RowAction = "create" | "update" | "skip";
+export type UnmatchedPolicy = "create" | "update_only" | "create_under_match";
+export type OnErrorPolicy = "skip_row" | "skip_value";
+export type ImportSourceKind = "supplier" | "retailer" | "shopify" | "worksheet" | "other";
+
+export interface ImportSource {
+  code: string;
+  label: string;
+  kind: ImportSourceKind;
+  default_policy: { unmatched: UnmatchedPolicy; on_error: OnErrorPolicy };
+}
+
+export type TransformOp =
+  | "trim"
+  | "split"
+  | "concat"
+  | "regex_extract"
+  | "value_replace"
+  | "unit_convert"
+  | "html_clean"
+  | "date_parse"
+  | "case";
+
+// split: {delimiter, index}; concat: {separator}; regex_extract: {pattern, group}; value_replace: {map};
+// unit_convert: {from, to}; date_parse: {formats[]}; case: {mode}
+export interface Transform {
+  op: TransformOp;
+  args: Record<string, unknown>;
+}
+
+// target is an attribute code, or a core key: style_number, color_code, size, sku, upc, family_code, or "skip"
+export interface ColumnMapping {
+  target: string;
+  sources: string[];
+  transforms: Transform[];
+  required?: boolean;
+  skip?: boolean;
+}
+
+export interface MappingTemplate {
+  id: string;
+  source_code: string;
+  name: string;
+  structure_signature: string;
+  header_row: number;
+  group_header_row?: number | null;
+  data_start_row: number;
+  columns: ColumnMapping[];
+  match_keys: string[];
+  unmatched_policy: UnmatchedPolicy;
+  level: Level;
+  version: number;
+  created_by: string;
+}
+
+export interface MappingSuggestion {
+  column: string;
+  target: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface ImportFileColumn {
+  name: string;
+  group?: string | null;
+  samples: string[];
+}
+
+export interface ImportFile {
+  index: number;
+  name: string;
+  sheet?: string | null;
+  header_row: number;
+  group_header_row?: number | null;
+  data_start_row: number;
+  rows: number;
+  columns: ImportFileColumn[];
+  precedence: number;
+}
+
+export interface ImportBatchOptions {
+  on_error: OnErrorPolicy;
+  unmatched_policy: string;
+  keyless_name_column?: string | null;
+}
+
+export interface ImportBatchStats {
+  rows: number;
+  ok: number;
+  warnings: number;
+  errors: number;
+  matched: number;
+  new: number;
+  ambiguous: number;
+  unmatched: number;
+  creates: number;
+  adds: number;
+  changes: number;
+  conflicts: number;
+  skipped: number;
+  placeholders_removed: Record<string, number>;
+}
+
+export interface ImportDiffChange {
+  entity_id: string;
+  label: string;
+  attribute_code: string;
+  old: unknown;
+  new: unknown;
+  [key: string]: unknown;
+}
+
+// Shapes of creates / adds / skipped entries are not fixed by the contract (first 200 of each);
+// the frontend renders the fields that are present.
+export interface ImportDiff {
+  creates: Record<string, unknown>[];
+  adds: Record<string, unknown>[];
+  changes: ImportDiffChange[];
+  conflicts: number;
+  skipped: Record<string, unknown>[];
+}
+
+export interface ImportBatch {
+  id: string;
+  status: BatchStatus;
+  source_code: string;
+  template_id?: string | null;
+  level: Level;
+  created_by: string;
+  created_at: string;
+  files: ImportFile[];
+  mapping: ColumnMapping[];
+  match_keys: string[];
+  options: ImportBatchOptions;
+  stats: ImportBatchStats;
+  worksheet_id?: string | null;
+  change_set_id?: string | null;
+  error?: string | null;
+  report?: Record<string, unknown>;
+  diff?: ImportDiff; // set by POST /review
+}
+
+export interface ImportRowIssue {
+  column?: string;
+  attribute?: string;
+  message: string;
+}
+
+export interface ImportRowCandidate {
+  entity_id: string;
+  label: string;
+  score: number;
+  reason: string;
+}
+
+export interface ImportRow {
+  id: string;
+  file_index: number;
+  row_number: number;
+  raw: Record<string, string>;
+  mapped: Record<string, unknown>;
+  match_status: MatchStatus;
+  match_key_used?: string | null;
+  entity_id?: string | null;
+  entity_label?: string | null;
+  candidates: ImportRowCandidate[];
+  errors: ImportRowIssue[];
+  warnings: ImportRowIssue[];
+  action: RowAction;
+}
+
+export interface ImportConflict {
+  id: string;
+  row_id: string;
+  entity_id: string;
+  entity_label: string;
+  attribute_code: string;
+  channel_code?: string | null;
+  current: { value: unknown; source_type: string; set_by?: string; set_at?: string; approval_state: string };
+  incoming: { value: unknown; source: string; file?: string; row_number?: number };
+  policy: string;
+  status: "open" | "accepted" | "rejected" | "edited";
+  resolved_value?: unknown;
+}
+
+export interface ValueMappingEntry {
+  raw: string;
+  count: number;
+  option_code?: string | null;
+  suggested?: string | null;
+  confidence?: number;
+}
+
+export interface ValueMappingList {
+  attribute_code: string;
+  list_code: string;
+  values: ValueMappingEntry[];
+}
+
+export interface ValueMappings {
+  lists: ValueMappingList[];
+}
+
+export interface MappingUpdate {
+  mapping: ColumnMapping[];
+  match_keys: string[];
+  options: ImportBatchOptions;
+  template_id?: string | null;
+  precedence?: number[];
+  // Assumption beyond the contract: header row edits made on the Upload step travel with the mapping.
+  files?: { index: number; header_row: number; group_header_row?: number | null; data_start_row: number }[];
+}
+
+export interface ImportRollbackResult {
+  restored: number;
+  manual: { entity_id: string; label: string; attribute_code: string; reason: string }[];
+}
+
+export interface ImportBatchList {
+  rows: ImportBatch[];
+  total: number;
+}
+
+export interface ImportRowList {
+  rows: ImportRow[];
+  total: number;
+}
+
+export interface ImportConflictList {
+  rows: ImportConflict[];
+  total: number;
+}
+
+// ---- Keyed worksheets (IMP-12) ----
+export interface WorksheetCreate {
+  selection: { view_id?: string; entity_ids?: string[]; level: Level };
+  group_codes: string[];
+  include_erp_context: boolean;
+}
+
+export interface WorksheetCreated {
+  id: string;
+  file_name: string;
+  rows: number;
+  url: string;
+}
+
+export interface Worksheet {
+  id: string;
+  created_by: string;
+  created_at: string;
+  rows: number;
+  group_codes: string[];
+  file_name: string;
+}
+
+// ---- Bulk actions (DM-04) ----
+export type BulkKind =
+  | "set_value"
+  | "clear_value"
+  | "add_option"
+  | "remove_option"
+  | "find_replace"
+  | "copy_attribute"
+  | "change_family"
+  | "assign_workflow"
+  | "run_ai"
+  | "send_for_approval";
+export type BulkStatus = "preview" | "queued" | "running" | "succeeded" | "failed" | "rolled_back";
+
+export interface BulkSelection {
+  view_id?: string;
+  entity_ids?: string[];
+  level: Level;
+}
+
+export interface BulkPreviewSample {
+  entity_id: string;
+  label: string;
+  attribute_code?: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface BulkReportItem {
+  entity_id: string;
+  label: string;
+  outcome: string;
+  reason?: string;
+}
+
+export interface BulkAction {
+  id: string;
+  kind: BulkKind;
+  selection: BulkSelection;
+  params: Record<string, unknown>;
+  status: BulkStatus;
+  preview: { total: number; sample: BulkPreviewSample[] };
+  report: { changed: number; skipped: number; failed: number; items: BulkReportItem[] };
+  change_set_id?: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface BulkPreviewRequest {
+  kind: BulkKind;
+  selection: BulkSelection;
+  params: Record<string, unknown>;
+}
+
+// ---- Workflows (DM-07, DM-12) ----
+export type WorkflowStepKind = "enrich" | "review";
+
+export interface WorkflowStepDef {
+  id?: string;
+  position: number;
+  label: string;
+  kind: WorkflowStepKind;
+  role_code: string;
+  group_codes: string[];
+  channel_codes: string[];
+  due_in_days: number;
+}
+
+// GET /api/workflows returns "definitions with steps"; the exact envelope is not fixed by the
+// contract so `entry_rule` is kept as free text.
+export interface WorkflowDefinition {
+  code: string;
+  label: string;
+  enabled: boolean;
+  entry_rule?: string | null;
+  steps: WorkflowStepDef[];
+}
+
+export interface WorkflowItemStep {
+  id: string;
+  position: number;
+  label: string;
+  kind: WorkflowStepKind;
+  role_code: string;
+  group_codes: string[];
+  channel_codes: string[];
+}
+
+export interface WorkflowItem {
+  id: string;
+  workflow_code: string;
+  workflow_label: string;
+  entity_id: string;
+  entity_label: string;
+  step: WorkflowItemStep | null;
+  steps_total: number;
+  state: "open" | "done" | "cancelled";
+  due_at?: string | null;
+  overdue: boolean;
+  assigned_role?: string | null;
+  assigned_email?: string | null;
+  history: { at: string; event: string; step?: string; by?: string; comment?: string }[];
+}
+
+export interface WorkflowInbox {
+  rows: WorkflowItem[];
+  total: number;
+}
+
+export type WorkflowScope = "mine" | "role" | "all";
+export type AgeBucket = "0-2" | "3-7" | "8-14" | "15+";
+
+export interface WorkflowManager {
+  by_step: { workflow_code: string; step_label: string; open: number; overdue: number; oldest_days: number }[];
+  by_age: { bucket: AgeBucket; count: number }[];
+}
+
+export interface WorkflowReject {
+  to_step_id: string;
+  comment: string;
+  attribute_comments?: { attribute_code: string; comment: string }[];
+}
+
+export interface CarryoverInfo {
+  siblings: { entity_id: string; label: string; color_code: string; approved_values: number; last_approved_at?: string | null }[];
+  steps_skippable: string[];
+}
+
+// ---- Comments and notifications (DM-09) ----
+export interface Comment {
+  id: string;
+  entity_id: string;
+  attribute_code?: string | null;
+  author: string;
+  body: string;
+  mentions: string[];
+  created_at: string;
+  resolved: boolean;
+}
+
+export type NotificationKind = "mention" | "workflow" | "approval" | "import" | "bulk" | "conflict";
+
+export interface Notification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body?: string | null;
+  link?: string | null;
+  created_at: string;
+  read_at?: string | null;
+}
+
+export interface NotificationList {
+  rows: Notification[];
+  unread: number;
+}
+
+// ---- Compare (DM-06) ----
+export interface CompareResult {
+  attributes: AttributeDefinition[];
+  a: ProductRow;
+  b: ProductRow;
+}
+
+// ---- Rules (GOV-01, GOV-06) ----
+export type RuleTrigger = "on_save" | "on_import" | "nightly" | "all";
+export type ConditionOp = "eq" | "neq" | "contains" | "in" | "empty" | "not_empty" | "gt" | "lt" | "regex";
+export type RuleActionOp =
+  | "set"
+  | "clear"
+  | "copy"
+  | "concatenate"
+  | "calculate"
+  | "set_approval_state"
+  | "add_to_workflow"
+  | "trigger_ai";
+
+// field = attr:<code> or core key
+export interface Condition {
+  field: string;
+  op: ConditionOp;
+  value?: unknown;
+}
+
+export interface RuleAction {
+  op: RuleActionOp;
+  target?: string;
+  value?: unknown;
+  source?: string;
+  parts?: string[];
+  separator?: string;
+  expression?: string;
+  workflow_code?: string;
+  task_type?: string;
+}
+
+export interface RulePreview {
+  sample: { entity_id: string; label: string; brand_scopes: string[]; changes: { attribute_code: string; before: unknown; after: unknown }[] }[];
+  brands_covered: string[];
+  matched_total: number;
+  suspicious_constants: { attribute_code: string; value: unknown; brands: string[]; families: string[] }[];
+  ok_to_activate: boolean;
+  blockers: string[];
+}
+
+export interface Rule {
+  id: string;
+  code: string;
+  label: string;
+  priority: number;
+  enabled: boolean;
+  status: "draft" | "active";
+  trigger: RuleTrigger;
+  level: Level;
+  condition: { all?: Condition[]; any?: Condition[] };
+  actions: RuleAction[];
+  brand_scopes: string[];
+  last_preview?: RulePreview | null;
+  activated_at?: string | null;
+  activated_by?: string | null;
+}
+
+export type RuleInput = Omit<Rule, "id" | "last_preview" | "activated_at" | "activated_by" | "status"> & { status?: "draft" | "active" };
+
+// GET /api/rules/runs rows are not fixed by the contract beyond "history"; render what is present.
+export interface RuleRun {
+  id: string;
+  rule_id?: string;
+  rule_code?: string;
+  started_at?: string;
+  finished_at?: string | null;
+  status?: string;
+  affected?: number;
+  trigger?: string;
+  by?: string;
+  [key: string]: unknown;
+}

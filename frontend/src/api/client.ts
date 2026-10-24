@@ -1,4 +1,4 @@
-// Typed fetch helpers for every endpoint in docs/api-contract.md.
+// Typed fetch helpers for every endpoint in docs/api-contract.md and docs/api-contract-phase2.md.
 // All calls go through `request` so errors surface the server's `{detail}` message.
 
 import type {
@@ -33,6 +33,39 @@ import type {
   Telemetry,
   UserRole,
   ValueEditResponse,
+  BulkAction,
+  BulkPreviewRequest,
+  CarryoverInfo,
+  Comment,
+  CompareResult,
+  ImportBatch,
+  ImportBatchList,
+  ImportConflictList,
+  ImportRollbackResult,
+  ImportRow,
+  ImportRowList,
+  ImportSource,
+  Level,
+  MappingSuggestion,
+  MappingTemplate,
+  MappingUpdate,
+  MatchStatus,
+  NotificationList,
+  Rule,
+  RuleInput,
+  RulePreview,
+  RuleRun,
+  RowAction,
+  ValueMappings,
+  WorkflowDefinition,
+  WorkflowInbox,
+  WorkflowItem,
+  WorkflowManager,
+  WorkflowReject,
+  WorkflowScope,
+  Worksheet,
+  WorksheetCreate,
+  WorksheetCreated,
 } from "./types";
 
 export class ApiError extends Error {
@@ -212,6 +245,162 @@ export const api = {
   jobs: {
     runs: (kind?: string) => get<JobRun[]>(`/api/jobs/runs${qs({ kind })}`),
     runIngest: () => post<JobRun>("/api/jobs/ingest/run"),
+  },
+
+  // =================================================================================
+  // Phase 2
+  // =================================================================================
+
+  // ---- Imports (IMP-01 to IMP-08) ----
+  imports: {
+    sources: () => get<ImportSource[]>("/api/imports/sources"),
+    createSource: (body: ImportSource) => post<ImportSource>("/api/imports/sources", body),
+    updateSource: (code: string, body: ImportSource) =>
+      put<ImportSource>(`/api/imports/sources/${encodeURIComponent(code)}`, body),
+    templates: (source?: string) => get<MappingTemplate[]>(`/api/imports/templates${qs({ source })}`),
+    // Saving from a batch: the contract says "save a template from a batch's mapping"; the body carries the
+    // template fields plus `batch_id` so the server can take the structure signature from the batch.
+    createTemplate: (body: Partial<MappingTemplate> & { batch_id?: string }) =>
+      post<MappingTemplate>("/api/imports/templates", body),
+    updateTemplate: (id: string, body: Partial<MappingTemplate>) =>
+      put<MappingTemplate>(`/api/imports/templates/${encodeURIComponent(id)}`, body),
+    deleteTemplate: (id: string) => del<void>(`/api/imports/templates/${encodeURIComponent(id)}`),
+    batches: (params: { status?: string; source?: string; page?: number } = {}) =>
+      get<ImportBatchList>(`/api/imports/batches${qs(params)}`),
+    createBatch: (files: File[], sourceCode: string, level: Level) => {
+      const fd = new FormData();
+      for (const f of files) fd.append("file", f);
+      fd.append("source_code", sourceCode);
+      fd.append("level", level);
+      return request<ImportBatch>("/api/imports/batches", { method: "POST", body: fd });
+    },
+    addFiles: (id: string, files: File[], sourceCode?: string) => {
+      const fd = new FormData();
+      for (const f of files) fd.append("file", f);
+      if (sourceCode) fd.append("source_code", sourceCode);
+      return request<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/files`, { method: "POST", body: fd });
+    },
+    shopifyPull: (id: string, file?: File | null) => {
+      const fd = new FormData();
+      if (file) fd.append("file", file);
+      return request<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/shopify-pull`, { method: "POST", body: fd });
+    },
+    batch: (id: string) => get<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}`),
+    suggestMapping: (id: string) => get<MappingSuggestion[]>(`/api/imports/batches/${encodeURIComponent(id)}/suggest-mapping`),
+    saveMapping: (id: string, body: MappingUpdate) => put<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/mapping`, body),
+    valueMappings: (id: string) => get<ValueMappings>(`/api/imports/batches/${encodeURIComponent(id)}/value-mappings`),
+    saveValueMappings: (id: string, items: { list_code: string; raw: string; option_code: string | null }[]) =>
+      put<ValueMappings | void>(`/api/imports/batches/${encodeURIComponent(id)}/value-mappings`, { items }),
+    validate: (id: string) => post<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/validate`),
+    rows: (id: string, params: { status?: string; match?: MatchStatus | ""; page?: number; page_size?: number } = {}) =>
+      get<ImportRowList>(`/api/imports/batches/${encodeURIComponent(id)}/rows${qs(params)}`),
+    errorFileUrl: (id: string) => `/api/imports/batches/${encodeURIComponent(id)}/error-file`,
+    match: (id: string) => post<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/match`),
+    updateRow: (id: string, rowId: string, body: { entity_id?: string | null; action?: RowAction }) =>
+      put<ImportRow>(`/api/imports/batches/${encodeURIComponent(id)}/rows/${encodeURIComponent(rowId)}`, body),
+    review: (id: string) => post<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/review`),
+    conflicts: (id: string, status?: string) =>
+      get<ImportConflictList>(`/api/imports/batches/${encodeURIComponent(id)}/conflicts${qs({ status })}`),
+    decideConflicts: (conflictIds: string[], decision: "accept" | "reject" | "edit", value?: unknown) =>
+      post<{ decided?: number; [k: string]: unknown }>("/api/imports/conflicts/decide", {
+        conflict_ids: conflictIds,
+        decision,
+        ...(decision === "edit" ? { value } : {}),
+      }),
+    commit: (id: string) => post<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/commit`),
+    rollback: (id: string) => post<ImportRollbackResult>(`/api/imports/batches/${encodeURIComponent(id)}/rollback`),
+    report: (id: string) => get<Record<string, unknown>>(`/api/imports/batches/${encodeURIComponent(id)}/report`),
+  },
+
+  // ---- Keyed worksheets (IMP-12) ----
+  worksheets: {
+    create: (body: WorksheetCreate) => post<WorksheetCreated>("/api/worksheets", body),
+    list: () => get<Worksheet[]>("/api/worksheets"),
+    fileUrl: (id: string) => `/api/worksheets/${encodeURIComponent(id)}/file`,
+  },
+
+  // ---- Bulk actions (DM-04) ----
+  bulk: {
+    preview: (body: BulkPreviewRequest) => post<BulkAction>("/api/bulk/preview", body),
+    run: (id: string) => post<BulkAction>(`/api/bulk/${encodeURIComponent(id)}/run`),
+    // "history": accepts either a bare array or {rows, total}.
+    list: (page = 1) => get<BulkAction[] | { rows: BulkAction[]; total: number }>(`/api/bulk${qs({ page })}`),
+    detail: (id: string) => get<BulkAction>(`/api/bulk/${encodeURIComponent(id)}`),
+    rollback: (id: string) => post<BulkAction | { restored?: number; [k: string]: unknown }>(`/api/bulk/${encodeURIComponent(id)}/rollback`),
+  },
+
+  // ---- Workflows (DM-07, DM-12) ----
+  workflows: {
+    list: () => get<WorkflowDefinition[]>("/api/workflows"),
+    save: (code: string, body: Omit<WorkflowDefinition, "code">) =>
+      put<WorkflowDefinition>(`/api/workflows/${encodeURIComponent(code)}`, body),
+    inbox: (scope: WorkflowScope, overdue?: boolean) =>
+      get<WorkflowInbox>(`/api/workflows/inbox${qs({ scope, overdue: overdue ? true : undefined })}`),
+    manager: () => get<WorkflowManager>("/api/workflows/manager"),
+    advance: (itemId: string, comment?: string) =>
+      post<WorkflowItem>(`/api/workflows/items/${encodeURIComponent(itemId)}/advance`, { comment: comment || undefined }),
+    reject: (itemId: string, body: WorkflowReject) =>
+      post<WorkflowItem>(`/api/workflows/items/${encodeURIComponent(itemId)}/reject`, body),
+    assign: (itemId: string, email: string) =>
+      post<WorkflowItem>(`/api/workflows/items/${encodeURIComponent(itemId)}/assign`, { email }),
+    cancel: (itemId: string) => post<WorkflowItem>(`/api/workflows/items/${encodeURIComponent(itemId)}/cancel`),
+    start: (workflowCode: string, entityIds: string[]) =>
+      post<{ started?: number; items?: WorkflowItem[]; [k: string]: unknown }>("/api/workflows/start", {
+        workflow_code: workflowCode,
+        entity_ids: entityIds,
+      }),
+    // "open items for a product": accepts a bare array or {rows}.
+    forProduct: (entityId: string) =>
+      get<WorkflowItem[] | { rows: WorkflowItem[] }>(`/api/products/${encodeURIComponent(entityId)}/workflow`),
+  },
+
+  carryover: {
+    info: (entityId: string) => get<CarryoverInfo>(`/api/products/${encodeURIComponent(entityId)}/carryover`),
+    run: (entityId: string, fromEntityId: string, attributeCodes?: string[]) =>
+      post<{ drafts: number }>(`/api/products/${encodeURIComponent(entityId)}/carryover`, {
+        from_entity_id: fromEntityId,
+        attribute_codes: attributeCodes,
+      }),
+  },
+
+  // ---- Comments and notifications (DM-09) ----
+  comments: {
+    list: (entityId: string) => get<Comment[]>(`/api/products/${encodeURIComponent(entityId)}/comments`),
+    create: (entityId: string, body: string, attributeCode?: string | null) =>
+      post<Comment>(`/api/products/${encodeURIComponent(entityId)}/comments`, {
+        body,
+        attribute_code: attributeCode || undefined,
+      }),
+    resolve: (commentId: string) => post<Comment | void>(`/api/comments/${encodeURIComponent(commentId)}/resolve`),
+  },
+
+  notifications: {
+    list: (unread?: boolean) => get<NotificationList>(`/api/notifications${qs({ unread: unread ? true : undefined })}`),
+    markRead: (ids?: string[]) => post<{ read?: number; [k: string]: unknown }>("/api/notifications/read", ids ? { ids } : {}),
+  },
+
+  // ---- Compare (DM-06) ----
+  compare: {
+    get: (a: string, b: string, channel?: string) => get<CompareResult>(`/api/products/compare${qs({ a, b, channel })}`),
+    copyFrom: (toEntityId: string, fromEntityId: string, attributeCodes: string[], channelCode?: string | null) =>
+      post<ValueEditResponse>(`/api/products/${encodeURIComponent(toEntityId)}/copy-from`, {
+        from_entity_id: fromEntityId,
+        attribute_codes: attributeCodes,
+        channel_code: channelCode || undefined,
+      }),
+  },
+
+  // ---- Rules (GOV-01, GOV-06) ----
+  rules: {
+    list: () => get<Rule[]>("/api/rules"),
+    create: (body: RuleInput) => post<Rule>("/api/rules", body),
+    update: (id: string, body: Partial<Rule>) => put<Rule>(`/api/rules/${encodeURIComponent(id)}`, body),
+    remove: (id: string) => del<void>(`/api/rules/${encodeURIComponent(id)}`),
+    preview: (id: string) => post<RulePreview>(`/api/rules/${encodeURIComponent(id)}/preview`),
+    activate: (id: string, force?: { force: true; reason: string }) =>
+      post<Rule>(`/api/rules/${encodeURIComponent(id)}/activate`, force ?? {}),
+    run: (id: string) => post<{ affected: number; report: Record<string, unknown> }>(`/api/rules/${encodeURIComponent(id)}/run`),
+    runs: (ruleId?: string) => get<RuleRun[] | { rows: RuleRun[]; total?: number }>(`/api/rules/runs${qs({ rule_id: ruleId })}`),
   },
 };
 
