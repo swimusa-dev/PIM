@@ -13,6 +13,7 @@ const NAV: { to: string; label: string; end?: boolean; sub?: boolean }[] = [
   { to: "/imports", label: "Imports" },
   { to: "/worksheets", label: "Worksheets" },
   { to: "/bulk", label: "Bulk actions" },
+  { to: "/exports", label: "Exports" },
   { to: "/packages", label: "Packages" },
   { to: "/images", label: "Images" },
   { to: "/reference", label: "Reference data" },

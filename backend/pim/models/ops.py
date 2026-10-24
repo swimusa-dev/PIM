@@ -116,13 +116,23 @@ class PublishRecord(Base, IdMixin):
     __tablename__ = "publish_record"
     channel_code: Mapped[str] = mapped_column(String(64), nullable=False)
     channel_version: Mapped[int] = mapped_column(Integer, default=1)
-    kind: Mapped[str] = mapped_column(String(32), default="package")  # package | dry_run | publish
+    kind: Mapped[str] = mapped_column(String(32), default="package")  # package | dry_run | publish | scheduled
+    mode: Mapped[str] = mapped_column(String(8), default="full")  # delta | full (EXP-06)
+    status: Mapped[str] = mapped_column(String(16), default="completed")  # running | completed | failed | skipped | submitted | accepted | partial | rejected
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     product_count: Mapped[int] = mapped_column(Integer, default=0)
+    valid_count: Mapped[int] = mapped_column(Integer, default=0)
+    invalid_count: Mapped[int] = mapped_column(Integer, default=0)
+    selection: Mapped[dict] = mapped_column(JSON, default=dict)
     payload_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    files: Mapped[list] = mapped_column(JSON, default=list)
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     package_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    external_batch_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class UpdatePackage(Base, IdMixin, TimestampMixin):

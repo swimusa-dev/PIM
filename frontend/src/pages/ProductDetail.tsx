@@ -1,6 +1,7 @@
-// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, EXP-03: Product detail page. Header with
+// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, EXP-03, EXP-12: Product detail page. Header with
 // identifiers, hierarchy tree, completeness per channel with "show only missing required", attribute groups,
-// channel override compare, images panel, history tab, comments tab, workflow panel, carryover, compare link.
+// channel override compare, images panel, history tab, comments tab, workflow panel, carryover, compare link,
+// eligibility reasons and overrides per channel.
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -16,6 +17,7 @@ import { HistoryTab } from "../detail/HistoryTab";
 import { CommentsTab } from "../detail/CommentsTab";
 import { WorkflowPanel } from "../detail/WorkflowPanel";
 import { CarryoverDialog } from "../detail/CarryoverDialog";
+import { EligibilityPanel } from "../detail/EligibilityPanel";
 import { LEVEL_LABEL } from "../lib/format";
 
 type Tab = "attributes" | "images" | "history" | "comments";
@@ -257,7 +259,7 @@ export function ProductDetailPage() {
                       <b>{channelLabel(c)}</b>
                       <ReadinessPill readiness={r} />
                     </div>
-                    {!r.eligible && <div className="muted small">Not eligible for this channel (EXP-12).</div>}
+                    {!r.eligible && <div className="muted small">Not eligible for this channel; see Eligibility below (EXP-12).</div>}
                     {r.missing_attributes.length > 0 && (
                       <div className="small">
                         <span className="muted">Missing:</span> {r.missing_attributes.map((m) => allAttributes.find((a) => a.code === m)?.label ?? m).join(", ")}
@@ -282,6 +284,10 @@ export function ProductDetailPage() {
                   </div>
                 );
               })}
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                <div className="muted small mb8">Eligibility (EXP-12)</div>
+                <EligibilityPanel entityId={entity.entity_id} channelLabel={channelLabel} />
+              </div>
             </div>
           </div>
         </div>

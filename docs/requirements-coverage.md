@@ -66,20 +66,20 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | ID | Status | Notes |
 |---|---|---|
 | EXP-01 Channel profiles | Built | versioned, mapping, protected fields, eligibility, config |
-| EXP-02 Target schema import | Seam | `target_schema` column and adapter hooks; loaders not built |
+| EXP-02 Target schema import | Built | loaders for Walmart MP_ITEM JSON Schema (per product type), Mirakl H11/PM11/VL11 (CSV or ZIP), Shopify metafield definitions, retailer XLSX templates; diff on refresh (added, removed, required flips, enum changes); channel version bumps (`export/schema_loaders.py`, Admin > Channels > Target schema) |
 | EXP-03 Readiness | Built | per channel with reasons, cached snapshots, grid filters |
-| EXP-04 Validate and dry run | Seam | adapter `validate` and `dry_run` on stubs; Walmart JSON Schema validation pending |
-| EXP-05 Publish history | Partial | `publish_record` written per package; retailer status polling pending |
-| EXP-06 Delta and full exports | Partial | changed-since selection; schedules pending |
+| EXP-04 Validate and dry run | Built | payload per style-color from mapping plus transforms (concatenate, format, unit convert, conditional, case, truncate, value map), validation against the loaded schema (required, type, enum, length, range) and raw JSON Schema for Walmart, dry run writes the payload file and a validation report, issues link back to our attribute (`export/payloads.py`, Exports page) |
+| EXP-05 Publish history | Built | `publish_record` plus one `publish_item` per product for every dry run, package, publish and scheduled run; retailer feedback from an error report file (CSV, JSON, XLSX) or adapter poll, mapped to attributes, tagged internal or external, rejections notify the owning role; health score and top errors per channel (`export/publishing.py`). Retailer API sends stay behind `PIM_FEATURE_CHANNEL_SEND=false` until Phase 5 credentials exist |
+| EXP-06 Delta and full exports | Built | delta = values, images or readiness changed since the last successful publish (plus never sent); per-channel schedule (every N hours or daily at a time, saved view scope) run by the `pim_channel_export` job; a run in progress is skipped, never queued (`/api/channels/{code}/delta`, `/schedule`, `/schedule/run-now`) |
 | EXP-07 Shopify direct writes | Seam | feature flag off; read path built; write path raises until D-03 and owner approval |
-| EXP-12 Eligibility | Built | brand scope, classification, lifecycle, entity type; forced export with approval not built |
+| EXP-12 Eligibility | Built | brand scope, classification, lifecycle, entity type; ineligible products are skipped from runs unless a PIM Admin records an override with a reason (and optional expiry), logged as an app event (`eligibility_override`, product detail readiness panel) |
 | EXP-13 Shopify update package | Built | API or CSV snapshot, diff, workbook, import CSVs per Shopify rules, review round trip, reconcile |
 | IMG-01 Air poll | Built | adapter with rate limiting and backoff; job |
 | IMG-02 Shot types and image requirements | Built | shot types seeded; requirement sets carry shots and image rules |
-| IMG-03 Matching | Built (tiers 1 and 2) / Seam (tier 3) | tier 3 needs PLT-00 step 8 |
-| IMG-05 Review workspace | Built | slots, candidates, queues, confirm or reject |
-| IMG-06 Write back to Air | Partial | function built, not yet wired to the confirm endpoint (needs PLT-00 step 7 and Air field names) |
-| IMG-07 Derivatives at export | Seam | `AirClient.cdn_url` |
+| IMG-03 Matching | Built (tiers 1 and 2) / Built behind flag (tier 3) | tier 3 = Air semantic search for confirmed neighbors plus a vision call that reads visible codes and the shot type; proposes only, never confirms (P4); on demand per asset, 409 until `PIM_FEATURE_IMAGE_AI_MATCH=true` after PLT-00 step 8 |
+| IMG-05 Review workspace | Built | slots, candidates, queues, confirm or reject, ordering (first confirmed link is the main image), technical rule checks per channel (min size, aspect ratio, format, AI generated) with a failing-rules queue |
+| IMG-06 Write back to Air | Built | confirm writes Style Number, Color Code, Shot Type (and AI Generated) to Air custom fields best effort; `ai_generated_image` flag per asset; Air field names to confirm in PLT-00 step 7 |
+| IMG-07 Derivatives at export | Built | per-channel image profile (shot types, size, format, pad ratio, background, naming); `image_rendition` cached per asset version and profile through Air CDN transforms, else queued for the `pim_renditions` Pillow job; payloads carry rendition URLs |
 
 ## Phase 4, AI
 

@@ -67,6 +67,16 @@ resources:
           job:
             id: ${resources.jobs.pim_rules_nightly.id}
             permission: CAN_MANAGE_RUN
+        - name: channel-export-job
+          description: Scheduled channel exports and feedback poll (EXP-05, EXP-06)
+          job:
+            id: ${resources.jobs.pim_channel_export.id}
+            permission: CAN_MANAGE_RUN
+        - name: renditions-job
+          description: Image renditions (IMG-07)
+          job:
+            id: ${resources.jobs.pim_renditions.id}
+            permission: CAN_MANAGE_RUN
         - name: bootstrap-job
           description: Alembic upgrade and seed load
           job:

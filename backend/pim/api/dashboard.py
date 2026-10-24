@@ -116,4 +116,8 @@ def image_queue(kind: str = "candidates", channel: str | None = None, page: int 
             rows.append({"entity_id": s.entity_id, "label": e.label if e else s.entity_id, "style_number": e.style_number if e else "",
                          "color_code": e.color_code if e else None, "missing_shots": s.detail.get("missing_shots", []), "channel_code": chan})
         return {"kind": kind, "total": total, "rows": rows}
+    if kind == "failing_rules":
+        from pim.services.images_phase3 import failing_rules_queue  # IMG-05
+
+        return failing_rules_queue(session, meta, channel, page, page_size)
     return {"kind": kind, "total": 0, "rows": []}

@@ -107,10 +107,19 @@ class FoundationModelClient:
         self.endpoint = endpoint
 
     def chat(self, messages: list[dict], max_tokens: int, temperature: float = 0.3) -> dict:
+        """Text-only messages go through the typed SDK call; messages whose content is a list of parts (text and
+        image_url, IMG-03 tier 3 vision) use the raw OpenAI-compatible invocation the endpoint also accepts."""
         from databricks.sdk import WorkspaceClient
-        from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 
         w = WorkspaceClient()
+        if any(isinstance(m.get("content"), list) for m in messages):
+            resp = w.api_client.do("POST", f"/serving-endpoints/{self.endpoint}/invocations",
+                                   body={"messages": messages, "max_tokens": max_tokens, "temperature": temperature})
+            choice = ((resp.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+            usage = resp.get("usage") or {}
+            return {"content": choice, "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0)}
+        from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+
         resp = w.serving_endpoints.query(
             name=self.endpoint,
             messages=[ChatMessage(role=ChatMessageRole(m["role"]), content=m["content"]) for m in messages],
@@ -163,6 +172,30 @@ class AIService:
                         "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
                         "latency_ms": int((time.monotonic() - started) * 1000), "ok": result.ok})
         return result
+
+
+    def describe_image(self, image_url: str, *, shot_types: list[str], user_email: str = "system") -> dict:
+        """IMG-03 tier 3: read visible style or color codes and name the shot type. Returns a dict with optional
+        style_number, color_code, shot_type and confidence; never writes anything (P4)."""
+        prompt = ("Look at this product photo from a swimwear catalog. Answer as JSON only with keys style_number "
+                  "(6 digit code visible on a tag or caption, or null), color_code (2 to 6 letter code or null), shot_type "
+                  f"(one of {', '.join(shot_types)} or null), confidence (0 to 1). Do not guess codes you cannot read.")
+        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": image_url}}]}]
+        started = time.monotonic()
+        out = self._factory(self.endpoint_for("classify")).chat(messages, 300, temperature=0.0)
+        text = (out.get("content") or "").strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        parsed: dict = {}
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                parsed = {}
+        self._log_call({"product_id": None, "task_type": "vision", "template": "image_identify", "template_version": "1",
+                        "model": self.endpoint_for("classify"), "user": user_email, "prompt_tokens": out.get("prompt_tokens", 0),
+                        "completion_tokens": out.get("completion_tokens", 0), "latency_ms": int((time.monotonic() - started) * 1000),
+                        "ok": bool(parsed)})
+        return {k: parsed.get(k) for k in ("style_number", "color_code", "shot_type", "confidence")} | {"raw": text[:500]}
 
 
 def grounding_check(text: str, attrs: dict[str, Any], *, has_certificate: bool) -> list[str]:

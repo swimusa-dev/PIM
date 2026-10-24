@@ -1,0 +1,395 @@
+"""EXP-04 channel payloads: build one payload per style-color from the channel mapping (EXP-01), apply the
+channel transforms, add channel images (IMG-07 renditions when present), then validate against the loaded target
+schema (EXP-02) before anything is sent. Every issue carries the entity, the target field and, where it maps back,
+our attribute code so the UI can link the fix (F10).
+
+Payload values come only from approved values (P4); drafts, unconfirmed defaults and rejected values never reach
+a channel. Channel overrides (channel_code = channel) win over global values.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+import re
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from pim.export.schema_loaders import TargetField, TargetSchema
+from pim.export.shopify_package import CLEAR, _channel_ready_value
+from pim.models import AssetLink, Channel, ProductEntity, ProductValue
+from pim.services.metadata import Metadata
+from pim.services.rules import eval_condition
+
+CORE_FIELDS = ("style_number", "color_code", "size", "sku", "upc", "label", "lifecycle_status", "family_code", "entity_type")
+UNIT_FACTORS = {("in", "cm"): 2.54, ("cm", "in"): 1 / 2.54, ("oz", "g"): 28.3495, ("g", "oz"): 1 / 28.3495,
+                ("lb", "kg"): 0.453592, ("kg", "lb"): 1 / 0.453592, ("mm", "in"): 1 / 25.4, ("in", "mm"): 25.4}
+
+
+@dataclass
+class PayloadIssue:
+    entity_id: str
+    label: str
+    message: str
+    kind: str  # missing_required | invalid_type | enum | length | schema | transform | image
+    severity: str = "error"
+    field: str | None = None
+    attribute_code: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class ProductPayload:
+    entity_id: str
+    label: str
+    external_id: str | None
+    data: dict[str, Any] = field(default_factory=dict)
+    images: list[dict] = field(default_factory=list)
+    issues: list[PayloadIssue] = field(default_factory=list)
+    sources: dict[str, str] = field(default_factory=dict)  # target field -> attribute code (for feedback mapping)
+
+    @property
+    def valid(self) -> bool:
+        return not any(i.severity == "error" for i in self.issues)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Values
+# ---------------------------------------------------------------------------------------------------
+def load_entity_values(session: Session, entities: list[ProductEntity]) -> tuple[dict[str, dict[tuple[str, str], ProductValue]], dict[str, ProductEntity]]:
+    styles = {s.id: s for s in session.execute(select(ProductEntity).where(
+        ProductEntity.id.in_({e.parent_id for e in entities if e.parent_id}))).scalars()} if entities else {}
+    ids = [e.id for e in entities] + list(styles)
+    values: dict[str, dict[tuple[str, str], ProductValue]] = {}
+    if ids:
+        for pv in session.execute(select(ProductValue).where(ProductValue.entity_id.in_(ids))).scalars():
+            values.setdefault(pv.entity_id, {})[(pv.attribute_code, pv.channel_code)] = pv
+    return values, styles
+
+
+def merged_values(values: dict[str, dict], ent: ProductEntity, style: ProductEntity | None) -> dict[tuple[str, str], ProductValue]:
+    merged = dict(values.get(style.id, {}) if style else {})
+    merged.update(values.get(ent.id, {}))
+    return merged
+
+
+def _core(ent: ProductEntity, style: ProductEntity | None, name: str) -> Any:
+    if name in ("style_number", "color_code", "size", "sku", "upc", "label", "lifecycle_status", "family_code", "entity_type"):
+        v = getattr(ent, name, None)
+        if v in (None, "") and style is not None:
+            v = getattr(style, name, None)
+        return v
+    erp = (ent.erp_fields or {}) or (style.erp_fields if style else {}) or {}
+    return erp.get(name)
+
+
+def resolve_source(session: Session, meta: Metadata, channel: Channel, ent: ProductEntity, style: ProductEntity | None,
+                   merged: dict[tuple[str, str], ProductValue], source: str) -> tuple[Any, str | None]:
+    """A mapping source is `attr`, `ref_attr.inner`, `core.<field>` or `erp.<field>`. Returns (value, attribute_code)."""
+    if source.startswith("core.") or source.startswith("erp."):
+        return _core(ent, style, source.split(".", 1)[1]), None
+    if source in CORE_FIELDS and source not in meta.attributes:
+        return _core(ent, style, source), None
+    v, pv = _channel_ready_value(session, meta, merged, source, channel.code)
+    if v is CLEAR:
+        return None, source.split(".", 1)[0]
+    attr = meta.attributes.get(source.rsplit(".", 1)[-1]) if "." in source else meta.attributes.get(source)
+    if attr is not None and pv is not None and attr.data_type in ("single_select", "multi_select") and attr.option_list_code:
+        v = _channel_option_value(meta, attr, pv, channel.code, v)
+    return v, source.split(".", 1)[0]
+
+
+def _channel_option_value(meta: Metadata, attr, pv: ProductValue, channel_code: str, fallback: Any) -> Any:  # noqa: ANN001
+    """DM-14: an option value can carry the retailer's own wording per channel; the label is the default."""
+    from pim.services.values import typed_from_row
+
+    t = typed_from_row(pv)
+    ol = meta.option_lists.get(attr.option_list_code)
+    if ol is None:
+        return fallback
+    by_code = {o.code: o for o in ol.values}
+
+    def one(code: str | None) -> Any:
+        o = by_code.get(code or "")
+        if o is None:
+            return code
+        return (o.channel_mappings or {}).get(channel_code) or o.label or code
+
+    if attr.data_type == "single_select":
+        return one(t.text)
+    if isinstance(t.json, list):
+        return [one(c) for c in t.json]
+    return fallback
+
+
+# ---------------------------------------------------------------------------------------------------
+# Transforms (EXP-01 transformation rules)
+# ---------------------------------------------------------------------------------------------------
+def _tmpl(template: str, data: dict[str, Any], flat: dict[str, Any]) -> str:
+    def repl(m: re.Match) -> str:
+        key = m.group(1)
+        v = flat.get(key.removeprefix("attr."), data.get(key))
+        return "" if v is None else str(v)
+
+    return re.sub(r"\{\{\s*([A-Za-z0-9_.]+)\s*\}\}", repl, template)
+
+
+def apply_transform(tr: dict, data: dict[str, Any], flat: dict[str, Any], ent: ProductEntity) -> tuple[Any, str | None]:
+    """Returns (new value for tr['target'], error message or None)."""
+    op, args, target = tr.get("op"), tr.get("args") or {}, tr.get("target")
+    cur = data.get(target)
+    try:
+        if op == "concatenate":
+            parts = [flat.get(p.removeprefix("attr."), data.get(p)) for p in args.get("parts", [])]
+            return (args.get("separator", " ")).join(str(p) for p in parts if p not in (None, "")), None
+        if op == "format":
+            return _tmpl(str(args.get("template", "")), data, flat), None
+        if op == "unit_convert":
+            if cur in (None, ""):
+                return cur, None
+            factor = UNIT_FACTORS.get((str(args.get("from", "")).lower(), str(args.get("to", "")).lower()))
+            if factor is None:
+                return cur, f"unknown unit conversion {args.get('from')} to {args.get('to')}"
+            return round(float(cur) * factor, int(args.get("precision", 2))), None
+        if op == "conditional":
+            hit = eval_condition(args.get("when") or {}, ent, flat)
+            chosen = args.get("then") if hit else args.get("else", cur)
+            return (_tmpl(chosen, data, flat) if isinstance(chosen, str) and "{{" in chosen else chosen), None
+        if op == "case":
+            from pim.adapters.feed_file import transform_case
+
+            return transform_case(None if cur is None else str(cur), str(args.get("mode", "as_is"))), None
+        if op == "truncate":
+            n = int(args.get("max_length", 0))
+            if cur is None or n <= 0:
+                return cur, None
+            s = str(cur)
+            return (s[: n - 1].rstrip() + ("…" if args.get("ellipsis") else "")) if len(s) > n and args.get("ellipsis") else s[:n], None
+        if op == "value_map":
+            m = args.get("map") or {}
+            return m.get(str(cur), cur), None
+        return cur, f"unknown transform op {op!r}"
+    except (TypeError, ValueError) as exc:
+        return cur, f"transform {op} failed: {exc}"
+
+
+# ---------------------------------------------------------------------------------------------------
+# Validation against the target schema
+# ---------------------------------------------------------------------------------------------------
+_NUM = re.compile(r"^-?\d+(\.\d+)?$")
+
+
+def _type_ok(f: TargetField, v: Any) -> bool:
+    if v is None:
+        return True
+    t = f.type
+    if t == "string" or t == "enum":
+        return isinstance(v, (str, int, float))
+    if t == "integer":
+        return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, str) and v.strip().lstrip("-").isdigit())
+    if t == "number":
+        return (isinstance(v, (int, float)) and not isinstance(v, bool)) or (isinstance(v, str) and bool(_NUM.match(v.strip())))
+    if t == "boolean":
+        return isinstance(v, bool) or str(v).lower() in ("true", "false", "yes", "no", "1", "0")
+    if t == "array":
+        return isinstance(v, (list, tuple))
+    if t == "object":
+        return isinstance(v, dict)
+    if t == "date":
+        if isinstance(v, (date, datetime)):
+            return True
+        try:
+            datetime.fromisoformat(str(v))
+            return True
+        except ValueError:
+            return False
+    return True
+
+
+def validate_payload(p: ProductPayload, schema: TargetSchema | None, channel: Channel) -> None:
+    if schema is None or not schema.fields:
+        return
+    for f in schema.fields:
+        v = p.data.get(f.name)
+        attr = p.sources.get(f.name)
+        if f.required and (v is None or v == "" or v == []):
+            p.issues.append(PayloadIssue(p.entity_id, p.label, f"{f.name} is required by the channel", "missing_required",
+                                         field=f.name, attribute_code=attr))
+            continue
+        if v is None:
+            continue
+        if not _type_ok(f, v):
+            p.issues.append(PayloadIssue(p.entity_id, p.label, f"{f.name} must be {f.type}, got {type(v).__name__}", "invalid_type",
+                                         field=f.name, attribute_code=attr))
+            continue
+        if f.enum:
+            vals = v if isinstance(v, list) else [v]
+            bad = [str(x) for x in vals if str(x) not in f.enum]
+            if bad:
+                p.issues.append(PayloadIssue(p.entity_id, p.label, f"{f.name} value {bad[0]!r} is not in the channel's list",
+                                             "enum", field=f.name, attribute_code=attr))
+        if f.max_length and isinstance(v, str) and len(v) > f.max_length:
+            p.issues.append(PayloadIssue(p.entity_id, p.label, f"{f.name} exceeds {f.max_length} characters ({len(v)})", "length",
+                                         field=f.name, attribute_code=attr))
+        if f.type in ("number", "integer") and (f.min is not None or f.max is not None):
+            try:
+                n = float(v)
+                if f.min is not None and n < f.min or f.max is not None and n > f.max:
+                    p.issues.append(PayloadIssue(p.entity_id, p.label, f"{f.name} is outside {f.min} to {f.max}", "schema",
+                                                 field=f.name, attribute_code=attr))
+            except (TypeError, ValueError):
+                pass
+    if schema.source == "walmart_spec" and schema.raw_available:
+        _validate_jsonschema(p, channel)
+
+
+def _validate_jsonschema(p: ProductPayload, channel: Channel) -> None:
+    """Walmart publishes real JSON Schema; when the raw spec is stored in channel.config we run it too."""
+    raw = (channel.config or {}).get("raw_schema")
+    if not raw:
+        return
+    try:
+        import jsonschema
+    except ImportError:  # pragma: no cover
+        return
+    validator = jsonschema.Draft7Validator(raw)
+    for err in validator.iter_errors(nest(p.data)):
+        path = "/".join(str(x) for x in err.absolute_path)
+        if any(i.field and i.field in path for i in p.issues):
+            continue
+        p.issues.append(PayloadIssue(p.entity_id, p.label, err.message[:300], "schema", field=path or None))
+
+
+def nest(flat: dict[str, Any]) -> dict[str, Any]:
+    """Fields named with `/a/b` paths or `a.b` keys become nested objects for API channels."""
+    out: dict[str, Any] = {}
+    for k, v in flat.items():
+        parts = [x for x in re.split(r"[/.]", k) if x] if (k.startswith("/") or "." in k) else [k]
+        cur = out
+        for part in parts[:-1]:
+            cur = cur.setdefault(part, {})
+        cur[parts[-1]] = v
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------------------------------
+def build_payloads(session: Session, meta: Metadata, channel: Channel, entities: list[ProductEntity],
+                   schema: TargetSchema | None = None, renditions: dict[str, list[dict]] | None = None) -> list[ProductPayload]:
+    schema = schema or TargetSchema.from_dict(channel.target_schema)
+    values, styles = load_entity_values(session, entities)
+    links: dict[str, list[AssetLink]] = {}
+    if entities:
+        for lk in session.execute(select(AssetLink).where(AssetLink.entity_id.in_([e.id for e in entities]),
+                                                          AssetLink.status == "confirmed").order_by(AssetLink.sort_order)).scalars():
+            links.setdefault(lk.entity_id, []).append(lk)
+    mapping: dict[str, str] = channel.attribute_mapping or {}
+    out: list[ProductPayload] = []
+    profile = channel.image_profile or {}
+    wanted_shots = profile.get("shot_types") or []
+    for ent in entities:
+        style = styles.get(ent.parent_id or "")
+        merged = merged_values(values, ent, style)
+        p = ProductPayload(entity_id=ent.id, label=ent.label, external_id=_external_id(ent, style, channel))
+        flat: dict[str, Any] = {name: _core(ent, style, name) for name in CORE_FIELDS}
+        for (code, ch), pv in merged.items():
+            if ch in ("", channel.code) and pv.approval_state == "approved":
+                v, _ = _channel_ready_value(session, meta, merged, code, channel.code)
+                flat[code] = None if v is CLEAR else v
+        for source, target in mapping.items():
+            if not target:
+                continue
+            v, attr = resolve_source(session, meta, channel, ent, style, merged, source)
+            p.data[target] = v
+            if attr:
+                p.sources[target] = attr
+        for tr in channel.transforms or []:
+            target = tr.get("target")
+            if not target:
+                continue
+            v, err = apply_transform(tr, p.data, flat, ent)
+            p.data[target] = v
+            if err:
+                p.issues.append(PayloadIssue(ent.id, ent.label, err, "transform", field=target, attribute_code=p.sources.get(target)))
+        for lk in links.get(ent.id, []):
+            if wanted_shots and lk.shot_type not in wanted_shots:
+                continue
+            rend = next((r for r in (renditions or {}).get(lk.asset_id, []) if r.get("channel_code") == channel.code), None)
+            p.images.append({"asset_id": lk.asset_id, "shot_type": lk.shot_type, "sort_order": lk.sort_order,
+                             "url": (rend or {}).get("url") or (lk.asset.thumbnail_url if lk.asset else None),
+                             "rendition": bool(rend), "ai_generated": bool(lk.asset and lk.asset.ai_generated_image)})
+        if wanted_shots and not p.images:
+            p.issues.append(PayloadIssue(ent.id, ent.label, "No confirmed image for the channel's shot types", "image", severity="warning"))
+        validate_payload(p, schema, channel)
+        out.append(p)
+    return out
+
+
+def _external_id(ent: ProductEntity, style: ProductEntity | None, channel: Channel) -> str | None:
+    key = (channel.config or {}).get("external_id") or "style_color"
+    if key == "style_color":
+        return f"{ent.style_number}-{ent.color_code}" if ent.color_code else ent.style_number
+    return _core(ent, style, key)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Files
+# ---------------------------------------------------------------------------------------------------
+def payload_files(channel: Channel, payloads: list[ProductPayload], schema: TargetSchema | None) -> list[tuple[str, bytes, str]]:
+    """Returns [(name, content, kind)]: the payload in the channel's file format plus a validation report CSV."""
+    fmt = (channel.config or {}).get("file_format") or ("json" if channel.adapter in ("walmart_mp", "mirakl_seller", "target_plus") else "csv")
+    valid = [p for p in payloads if p.valid]
+    files: list[tuple[str, bytes, str]] = []
+    columns = [f.name for f in (schema.fields if schema else [])] or sorted({k for p in payloads for k in p.data})
+    if fmt == "json":
+        body = [{"external_id": p.external_id, **nest(p.data), "images": p.images} for p in valid]
+        if channel.adapter == "walmart_mp":
+            from pim.adapters.walmart_mp import WalmartMarketplaceAdapter
+
+            feeds = WalmartMarketplaceAdapter().build_feed([{"orderable": nest(p.data).get("Orderable", {}),
+                                                              "visible": nest(p.data).get("Visible", {})} for p in valid])
+            body = feeds[0] if len(feeds) == 1 else feeds
+        files.append(("payload.json", json.dumps(body, indent=2, default=str).encode(), "payload"))
+    elif fmt == "xlsx":
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "feed"
+        ws.append(columns)
+        for p in valid:
+            ws.append([_cell(p.data.get(c)) for c in columns])
+        buf = io.BytesIO()
+        wb.save(buf)
+        files.append(("payload.xlsx", buf.getvalue(), "payload"))
+    else:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(columns)
+        for p in valid:
+            w.writerow([_cell(p.data.get(c)) for c in columns])
+        files.append(("payload.csv", buf.getvalue().encode("utf-8-sig"), "payload"))
+    rep = io.StringIO()
+    w = csv.writer(rep)
+    w.writerow(["entity_id", "product", "severity", "kind", "field", "attribute_code", "message"])
+    for p in payloads:
+        for i in p.issues:
+            w.writerow([i.entity_id, i.label, i.severity, i.kind, i.field or "", i.attribute_code or "", i.message])
+    files.append(("validation_report.csv", rep.getvalue().encode("utf-8-sig"), "report"))
+    return files
+
+
+def _cell(v: Any) -> Any:
+    if isinstance(v, (list, tuple)):
+        return ", ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return json.dumps(v)
+    return v

@@ -1,0 +1,483 @@
+"""EXP-05 publish history and feedback loop, EXP-06 delta and scheduled exports.
+
+A PublishRecord is created for every dry run, package, publish and scheduled run with its channel version, the
+selection, validation counts, the files written to the publish volume and one PublishItem per product. Retailer
+feedback (an error report file or an adapter poll) is mapped back to attributes through the channel mapping and
+tagged `internal` (our data) or `external` (retailer side), item statuses move, and rejections notify the users
+holding the channel's owning role. Health score = accepted / (accepted + rejected) over the last 30 days.
+
+Sending to a retailer API is behind PIM_FEATURE_CHANNEL_SEND; EXP-07 direct Shopify writes stay behind
+PIM_FEATURE_SHOPIFY_DIRECT_WRITE, so the Shopify publish path produces an EXP-13 package (Phase 1 decision).
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+import logging
+import re
+from collections import Counter
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from openpyxl import load_workbook
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from pim.adapters.base import NotConfigured
+from pim.auth.identity import CurrentUser
+from pim.config import get_settings
+from pim.export.payloads import ProductPayload, build_payloads, payload_files
+from pim.export.schema_loaders import TargetSchema
+from pim.export.shopify_package import resolve_selection
+from pim.models import (
+    AssetLink,
+    Channel,
+    EligibilityOverride,
+    ProductEntity,
+    ProductValue,
+    PublishItem,
+    PublishRecord,
+    ReadinessSnapshot,
+    UserRole,
+)
+from pim.models._common import utcnow
+from pim.services.collab import notify
+from pim.services.metadata import Metadata
+from pim.services.storage import Storage
+
+log = logging.getLogger(__name__)
+
+TERMINAL = ("completed", "failed", "skipped", "submitted", "accepted", "partial", "rejected")
+EXTERNAL_HINTS = re.compile(r"\b(internal server|timeout|rate limit|throttl|unavailable|retailer|marketplace|category not|"
+                            r"setup by match|item not found|gtin.*(already|exists|in use)|duplicate|restricted brand|"
+                            r"brand not authorized|prohibited|not allowed to sell|invalid request|service)\b", re.IGNORECASE)
+
+
+def storage() -> Storage:
+    s = get_settings()
+    return Storage(getattr(s, "publish_volume", None) or s.package_volume)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Selection and delta (EXP-06)
+# ---------------------------------------------------------------------------------------------------
+def last_success_at(session: Session, channel_code: str) -> datetime | None:
+    return session.execute(select(func.max(PublishRecord.finished_at)).where(
+        PublishRecord.channel_code == channel_code, PublishRecord.kind.in_(["publish", "scheduled", "package"]),
+        PublishRecord.status.in_(["completed", "submitted", "accepted", "partial"]))).scalar_one_or_none()
+
+
+def eligible_entities(session: Session, meta: Metadata, channel: Channel, entities: list[ProductEntity]) -> tuple[list[ProductEntity], list[dict]]:
+    """Drop ineligible products (EXP-12) unless an unexpired override exists. Returns (kept, skipped)."""
+    from pim.services.readiness import check_eligibility
+
+    now = utcnow()
+    overrides = {o.entity_id: o for o in session.execute(select(EligibilityOverride).where(
+        EligibilityOverride.channel_code == channel.code)).scalars() if o.expires_at is None or o.expires_at > now}
+    styles = {s.id: s for s in session.execute(select(ProductEntity).where(
+        ProductEntity.id.in_({e.parent_id for e in entities if e.parent_id}))).scalars()} if entities else {}
+    kept, skipped = [], []
+    for e in entities:
+        reasons = check_eligibility(channel, e, styles.get(e.parent_id or ""))
+        if reasons and e.id not in overrides:
+            skipped.append({"entity_id": e.id, "label": e.label, "reasons": reasons})
+        else:
+            kept.append(e)
+    return kept, skipped
+
+
+def delta_candidates(session: Session, meta: Metadata, channel: Channel, base: list[ProductEntity] | None = None) -> list[dict]:
+    """Products whose values, images or readiness changed since the last successful publish to the channel."""
+    since = last_success_at(session, channel.code)
+    if base is None:
+        base = session.execute(select(ProductEntity).where(ProductEntity.level == "style_color")).scalars().all()
+    base, _ = eligible_entities(session, meta, channel, base)
+    ids = [e.id for e in base]
+    if not ids:
+        return []
+    by_id = {e.id: e for e in base}
+    parents = {e.parent_id: e.id for e in base if e.parent_id}
+    reasons: dict[str, list[str]] = {}
+    if since is None:
+        return [{"entity_id": e.id, "label": e.label, "reasons": ["Never published to this channel"]} for e in base]
+    for pv in session.execute(select(ProductValue.entity_id, ProductValue.attribute_code).where(
+            ProductValue.entity_id.in_(ids + list(parents)), ProductValue.set_at >= since, ProductValue.approval_state == "approved")):
+        target = pv.entity_id if pv.entity_id in by_id else parents.get(pv.entity_id)
+        if target:
+            reasons.setdefault(target, []).append(f"{pv.attribute_code} changed")
+    for lk in session.execute(select(AssetLink).where(AssetLink.entity_id.in_(ids), AssetLink.decided_at >= since)).scalars():
+        reasons.setdefault(lk.entity_id, []).append(f"image {lk.shot_type or lk.asset_id} {lk.status}")
+    for snap in session.execute(select(ReadinessSnapshot).where(ReadinessSnapshot.entity_id.in_(ids),
+                                                                ReadinessSnapshot.channel_code == channel.code,
+                                                                ReadinessSnapshot.computed_at >= since)).scalars():
+        reasons.setdefault(snap.entity_id, []).append("readiness recomputed" if snap.ready else "readiness changed (not ready)")
+    sent_before = {r for r in session.execute(select(PublishItem.entity_id).join(PublishRecord).where(
+        PublishRecord.channel_code == channel.code, PublishItem.status.in_(["submitted", "accepted", "in_review"]))).scalars()}
+    for e in base:
+        if e.id not in sent_before:
+            reasons.setdefault(e.id, []).append("Never sent to this channel")
+    return [{"entity_id": eid, "label": by_id[eid].label, "reasons": sorted(set(r))} for eid, r in reasons.items()]
+
+
+# ---------------------------------------------------------------------------------------------------
+# Runs (EXP-04 dry run, EXP-05 publish)
+# ---------------------------------------------------------------------------------------------------
+def start_run(session: Session, channel: Channel, kind: str, mode: str, user_email: str, selection: dict) -> PublishRecord:
+    rec = PublishRecord(channel_code=channel.code, channel_version=channel.version, kind=kind, mode=mode, status="running",
+                        created_by=user_email, selection=selection or {})
+    session.add(rec)
+    session.flush()
+    return rec
+
+
+def running_run(session: Session, channel_code: str) -> PublishRecord | None:
+    return session.execute(select(PublishRecord).where(PublishRecord.channel_code == channel_code,
+                                                       PublishRecord.status == "running").order_by(PublishRecord.created_at.desc())).scalars().first()
+
+
+def execute_run(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord, *, preview: int = 5,
+                send: bool = False, user: CurrentUser | None = None) -> PublishRecord:
+    """Resolve, filter, build, validate, write files, store items; for publishes also send (when allowed)."""
+    st = storage()
+    try:
+        entities = resolve_selection(session, rec.selection or {})
+        if rec.mode == "delta":
+            delta = {d["entity_id"] for d in delta_candidates(session, meta, channel, entities or None)}
+            entities = [e for e in (entities or session.execute(select(ProductEntity).where(ProductEntity.id.in_(delta))).scalars().all())
+                        if e.id in delta]
+        entities, skipped = eligible_entities(session, meta, channel, entities)
+        schema = TargetSchema.from_dict(channel.target_schema)
+        rends = _renditions_for(session, channel, entities)
+        payloads = build_payloads(session, meta, channel, entities, schema, rends)
+        valid = [p for p in payloads if p.valid]
+        rec.product_count, rec.valid_count, rec.invalid_count = len(payloads), len(valid), len(payloads) - len(valid)
+        files = payload_files(channel, payloads, schema)
+        rec.payload_path = st.path("publishes", rec.id)
+        rec.files = []
+        for name, content, kind in files:
+            full = st.write(f"publishes/{rec.id}/{name}", content)
+            rec.files.append({"name": name, "size": len(content), "kind": kind, "path": full})
+        issue_counter = Counter(i.kind for p in payloads for i in p.issues if i.severity == "error")
+        rec.summary = {"preview": [{"entity_id": p.entity_id, "label": p.label, "external_id": p.external_id, "data": p.data,
+                                    "images": p.images} for p in payloads[: max(0, preview)]],
+                       "skipped_ineligible": skipped[:200], "skipped_ineligible_count": len(skipped),
+                       "issues_by_kind": dict(issue_counter), "schema_source": schema.source, "schema_fields": len(schema.fields),
+                       "mode": rec.mode}
+        for p in payloads:
+            session.add(PublishItem(publish_id=rec.id, entity_id=p.entity_id, external_id=p.external_id,
+                                    status="valid" if p.valid else "invalid", payload=p.data,
+                                    issues=[i.as_dict() for i in p.issues], errors=[]))
+        session.flush()
+        if rec.kind in ("publish", "scheduled") and valid:
+            _send(session, meta, channel, rec, valid, send, user)
+        else:
+            rec.status = "completed"
+    except Exception as exc:  # noqa: BLE001
+        log.exception("publish run %s failed", rec.id)
+        rec.status, rec.error = "failed", str(exc)[:2000]
+    rec.finished_at = utcnow()
+    return rec
+
+
+def _renditions_for(session: Session, channel: Channel, entities: list[ProductEntity]) -> dict[str, list[dict]]:
+    from pim.models import ImageRendition
+
+    if not entities:
+        return {}
+    asset_ids = {lk.asset_id for lk in session.execute(select(AssetLink).where(
+        AssetLink.entity_id.in_([e.id for e in entities]), AssetLink.status == "confirmed")).scalars()}
+    out: dict[str, list[dict]] = {}
+    if asset_ids:
+        for r in session.execute(select(ImageRendition).where(ImageRendition.asset_id.in_(asset_ids),
+                                                              ImageRendition.channel_code == channel.code)).scalars():
+            out.setdefault(r.asset_id, []).append({"channel_code": r.channel_code, "url": r.url, "width": r.width, "height": r.height})
+    return out
+
+
+def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord, valid: list[ProductPayload],
+          send: bool, user: CurrentUser | None) -> None:
+    transport = (channel.config or {}).get("transport") or ("package" if channel.adapter == "shopify_admin" else "download")
+    items = {i.entity_id: i for i in session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars()}
+    if transport == "package" or channel.adapter == "shopify_admin":
+        # EXP-07 stays off: the Shopify publish is an EXP-13 package built from the same selection.
+        from pim.models import UpdatePackage
+
+        pkg = UpdatePackage(channel_code=channel.code, created_by=rec.created_by, status="pending",
+                            selection={"entity_ids": [p.entity_id for p in valid]}, snapshot_mode=(channel.config or {}).get("snapshot_mode", "api"))
+        session.add(pkg)
+        session.flush()
+        rec.package_id = pkg.id
+        rec.summary["package_id"] = pkg.id
+        rec.status = "completed"
+        for p in valid:
+            items[p.entity_id].status = "submitted"
+        return
+    if transport == "download" or not send or not getattr(get_settings(), "feature_channel_send", False):
+        rec.status = "completed"
+        rec.summary["delivery"] = "download" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"
+        return
+    adapter = adapter_for(channel)
+    try:
+        res = adapter.publish([p.data for p in valid], dry_run=False)
+    except NotConfigured as exc:
+        rec.status, rec.error = "failed", str(exc)
+        return
+    rec.external_batch_id = res.batch_id
+    rec.status = "submitted"
+    rec.summary["delivery"] = {"batch_id": res.batch_id, "accepted": res.accepted, "rejected": res.rejected, **res.detail}
+    for p in valid:
+        items[p.entity_id].status = "submitted"
+
+
+def adapter_for(channel: Channel):  # noqa: ANN201
+    if channel.adapter == "walmart_mp":
+        from pim.adapters.walmart_mp import WalmartMarketplaceAdapter
+
+        return WalmartMarketplaceAdapter()
+    if channel.adapter == "mirakl_seller":
+        from pim.adapters.mirakl_seller import MiraklSellerAdapter
+
+        return MiraklSellerAdapter()
+    if channel.adapter == "target_plus":
+        from pim.adapters.target_plus import TargetPlusAdapter
+
+        return TargetPlusAdapter()
+    raise NotConfigured(f"No API adapter for {channel.adapter}")
+
+
+# ---------------------------------------------------------------------------------------------------
+# Feedback (EXP-05)
+# ---------------------------------------------------------------------------------------------------
+ID_KEYS = ("external_id", "sku", "product id", "productid", "item id", "itemid", "product_id", "id", "style", "style_number", "handle", "gtin", "upc")
+MSG_KEYS = ("message", "error", "errors", "description", "reason", "ingestion errors", "error message", "detail", "issue")
+FIELD_KEYS = ("field", "attribute", "attribute code", "attribute_code", "column", "property", "path")
+STATUS_KEYS = ("status", "state", "result", "ingestion status")
+
+
+def parse_feedback_file(name: str, content: bytes) -> list[dict]:
+    """Rows of {external_id, message, field?, status?} from CSV, JSON or XLSX retailer error reports."""
+    rows: list[dict] = []
+    lower = name.lower()
+    if lower.endswith(".json") or content[:1] in (b"{", b"["):
+        doc = json.loads(content.decode("utf-8-sig"))
+        if isinstance(doc, dict):
+            doc = doc.get("errors") or doc.get("items") or doc.get("itemDetails", {}).get("itemIngestionStatus") or doc.get("data") or [doc]
+        for it in doc:
+            if isinstance(it, dict):
+                rows.append(_norm_row(it))
+        return rows
+    if lower.endswith(".xlsx"):
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        header = [str(h or "").strip() for h in next(it, [])]
+        for r in it:
+            if any(c not in (None, "") for c in r):
+                rows.append(_norm_row(dict(zip(header, r, strict=False))))
+        wb.close()
+        return rows
+    text = content.decode("utf-8-sig", errors="replace")
+    for r in csv.DictReader(io.StringIO(text)):
+        rows.append(_norm_row(r))
+    return rows
+
+
+def _norm_row(r: dict) -> dict:
+    low = {str(k).strip().lower(): v for k, v in r.items()}
+
+    def pick(keys: tuple[str, ...]) -> Any:
+        for k in keys:
+            if k in low and low[k] not in (None, ""):
+                return low[k]
+        return None
+
+    msg = pick(MSG_KEYS)
+    if isinstance(msg, list):
+        msg = "; ".join(str(m.get("description", m) if isinstance(m, dict) else m) for m in msg)
+    status = pick(STATUS_KEYS)
+    return {"external_id": str(pick(ID_KEYS) or "").strip(), "message": str(msg or "").strip(),
+            "field": (str(pick(FIELD_KEYS)).strip() if pick(FIELD_KEYS) else None),
+            "status": str(status).strip().lower() if status else None}
+
+
+def classify_error(message: str, field_name: str | None, channel: Channel) -> tuple[str, str | None]:
+    """Tag a retailer message internal (our data, mappable to an attribute) or external (retailer side)."""
+    mapping: dict[str, str] = channel.attribute_mapping or {}
+    rev = {v: k.split(".", 1)[0] for k, v in mapping.items() if v}
+    attr = None
+    if field_name:
+        attr = rev.get(field_name) or rev.get(field_name.split("/")[-1])
+    if attr is None:
+        for target, code in rev.items():
+            if target and re.search(rf"\b{re.escape(target)}\b", message or "", re.IGNORECASE):
+                attr = code
+                break
+    if attr:
+        return "internal", attr
+    if EXTERNAL_HINTS.search(message or ""):
+        return "external", None
+    if field_name:
+        return "internal", None
+    return "external", None
+
+
+def apply_feedback(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord, rows: list[dict],
+                   source: str = "file") -> dict[str, int]:
+    items = session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars().all()
+    by_ext = {(i.external_id or "").lower(): i for i in items}
+    ents = {e.id: e for e in session.execute(select(ProductEntity).where(ProductEntity.id.in_([i.entity_id for i in items]))).scalars()} if items else {}
+    by_sku: dict[str, PublishItem] = {}
+    for i in items:
+        e = ents.get(i.entity_id)
+        if e:
+            by_sku[e.style_number.lower()] = i
+            if e.color_code:
+                by_sku[f"{e.style_number}-{e.color_code}".lower()] = i
+                by_sku[f"{e.style_number}{e.color_code}".lower()] = i
+    counts = Counter()
+    touched: set[str] = set()
+    for r in rows:
+        key = (r.get("external_id") or "").lower()
+        item = by_ext.get(key) or by_sku.get(key) or by_sku.get(key.replace("_", "-"))
+        if item is None:
+            counts["unmatched"] += 1
+            continue
+        msg = r.get("message") or ""
+        status = (r.get("status") or "").lower()
+        if msg:
+            kind, attr = classify_error(msg, r.get("field"), channel)
+            item.errors = [*(item.errors or []), {"message": msg[:500], "field": r.get("field"), "attribute_code": attr, "kind": kind,
+                                                  "source": source, "at": utcnow().isoformat()}]
+            item.status = "rejected" if status not in ("in_review", "pending", "review", "processing") else "in_review"
+        elif status in ("accepted", "success", "published", "ok", "live", "active"):
+            item.status = "accepted"
+        elif status in ("rejected", "error", "failed", "fail"):
+            item.status = "rejected"
+        elif status in ("in_review", "review", "pending", "processing"):
+            item.status = "in_review"
+        touched.add(item.id)
+    for item in items:
+        if item.id in touched:
+            counts[item.status] += 1
+    if touched:
+        statuses = Counter(i.status for i in items)
+        if statuses.get("rejected") and (statuses.get("accepted") or statuses.get("submitted")):
+            rec.status = "partial"
+        elif statuses.get("rejected") and not statuses.get("accepted"):
+            rec.status = "rejected"
+        elif statuses.get("accepted") and not statuses.get("rejected") and not statuses.get("in_review"):
+            rec.status = "accepted"
+        rec.summary = {**(rec.summary or {}), "feedback": {"at": utcnow().isoformat(), "source": source, **{k: v for k, v in counts.items()}}}
+        rejected = [i for i in items if i.id in touched and i.status == "rejected"]
+        if rejected:
+            _notify_owners(session, channel, rec, rejected, ents)
+    return {"updated": len(touched), "accepted": counts.get("accepted", 0), "rejected": counts.get("rejected", 0),
+            "in_review": counts.get("in_review", 0), "unmatched": counts.get("unmatched", 0)}
+
+
+def poll_feedback(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord) -> dict[str, int]:
+    if not rec.external_batch_id:
+        raise NotConfigured("This publish has no retailer batch id to poll; upload the retailer's error report instead")
+    adapter = adapter_for(channel)
+    status = adapter.fetch_status(rec.external_batch_id)
+    errors = adapter.fetch_errors(rec.external_batch_id)
+    rows = [_norm_row(e) for e in errors]
+    for it in status.get("items", []) if isinstance(status, dict) else []:
+        rows.append(_norm_row(it))
+    return apply_feedback(session, meta, channel, rec, rows, source="adapter")
+
+
+def _notify_owners(session: Session, channel: Channel, rec: PublishRecord, rejected: list[PublishItem], ents: dict) -> None:
+    role = (channel.config or {}).get("owner_role") or "ecommerce"
+    emails = {u.email for u in session.execute(select(UserRole).where(UserRole.role_code == role)).scalars()}
+    emails.add(rec.created_by)
+    labels = ", ".join(ents[i.entity_id].label for i in rejected[:5] if i.entity_id in ents)
+    for email in emails:
+        if email and email != "system":
+            notify(session, email, "publish_rejected", f"{channel.label}: {len(rejected)} product(s) rejected",
+                   f"Rejected: {labels}{' and more' if len(rejected) > 5 else ''}", f"/exports/{rec.id}")
+
+
+# ---------------------------------------------------------------------------------------------------
+# Health (EXP-05)
+# ---------------------------------------------------------------------------------------------------
+def channel_health(session: Session, channel: Channel, days: int = 30) -> dict:
+    since = utcnow() - timedelta(days=days)
+    recs = session.execute(select(PublishRecord).where(PublishRecord.channel_code == channel.code,
+                                                       PublishRecord.kind.in_(["publish", "scheduled", "package"]),
+                                                       PublishRecord.created_at >= since)).scalars().all()
+    ids = [r.id for r in recs]
+    items = session.execute(select(PublishItem).where(PublishItem.publish_id.in_(ids))).scalars().all() if ids else []
+    st = Counter(i.status for i in items)
+    accepted, rejected = st.get("accepted", 0), st.get("rejected", 0)
+    score = round(accepted / (accepted + rejected), 3) if accepted + rejected else None
+    errs = Counter()
+    kinds: dict[str, str] = {}
+    for i in items:
+        for e in i.errors or []:
+            errs[e["message"]] += 1
+            kinds[e["message"]] = e.get("kind", "external")
+    last = max((r.created_at for r in recs), default=None)
+    return {"channel_code": channel.code, "publishes": len(recs), "products_sent": sum(r.product_count for r in recs),
+            "accepted": accepted, "rejected": rejected, "in_review": st.get("in_review", 0), "health_score": score,
+            "last_publish_at": last.isoformat() if last else None,
+            "last_success_at": (lambda d: d.isoformat() if d else None)(last_success_at(session, channel.code)),
+            "open_rejections": rejected, "top_errors": [{"message": m, "count": c, "kind": kinds[m]} for m, c in errs.most_common(10)]}
+
+
+# ---------------------------------------------------------------------------------------------------
+# Schedule (EXP-06)
+# ---------------------------------------------------------------------------------------------------
+DEFAULT_SCHEDULE = {"enabled": False, "mode": "delta", "every_hours": None, "at_hour": None, "at_minute": 0,
+                    "timezone": "America/New_York", "view_id": None, "last_run_at": None, "last_result": None}
+
+
+def schedule_out(channel: Channel) -> dict:
+    return {**DEFAULT_SCHEDULE, **(channel.schedule or {})}
+
+
+def schedule_due(sched: dict, now: datetime | None = None) -> bool:
+    if not sched.get("enabled"):
+        return False
+    now = now or utcnow()
+    last = sched.get("last_run_at")
+    last_dt = datetime.fromisoformat(last) if last else None
+    if sched.get("every_hours"):
+        return last_dt is None or now - last_dt >= timedelta(hours=float(sched["every_hours"]))
+    if sched.get("at_hour") is not None:
+        try:
+            from zoneinfo import ZoneInfo
+
+            local = now.astimezone(ZoneInfo(sched.get("timezone") or "America/New_York"))
+        except Exception:  # noqa: BLE001
+            local = now
+        due_today = local.replace(hour=int(sched["at_hour"]), minute=int(sched.get("at_minute") or 0), second=0, microsecond=0)
+        if local < due_today:
+            return False
+        return last_dt is None or last_dt.astimezone(local.tzinfo) < due_today
+    return False
+
+
+def run_scheduled(session: Session, meta: Metadata, channel: Channel, requested_by: str = "scheduler", force: bool = False) -> dict:
+    """One scheduled export; skipped (not queued) when a run is already in progress for the channel."""
+    sched = schedule_out(channel)
+    if running_run(session, channel.code):
+        channel.schedule = {**sched, "last_result": "skipped: a run is already in progress"}
+        return {"status": "skipped", "reason": "A run for this channel is already in progress"}
+    if not force and not schedule_due(sched):
+        return {"status": "skipped", "reason": "Not due"}
+    selection = {"view_id": sched["view_id"]} if sched.get("view_id") else {"all": True}
+    rec = start_run(session, channel, "scheduled", sched.get("mode", "delta"), requested_by, selection)
+    session.flush()
+    if selection.get("all"):
+        rec.selection = {"entity_ids": [e.id for e in session.execute(select(ProductEntity).where(ProductEntity.level == "style_color")).scalars()]}
+    execute_run(session, meta, channel, rec, send=True)
+    channel.schedule = {**sched, "last_run_at": utcnow().isoformat(),
+                        "last_result": f"{rec.status}: {rec.valid_count} valid, {rec.invalid_count} invalid" + (f" ({rec.error})" if rec.error else "")}
+    return {"status": "started", "publish_id": rec.id, "result": rec.status}
+
+
+def now_utc() -> datetime:
+    return datetime.now(UTC)

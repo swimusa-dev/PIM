@@ -1,0 +1,31 @@
+{
+  "title": "MP_ITEM_SPEC_5.0", "version": "5.0.20260901", "type": "object",
+  "properties": {
+    "MPItemFeedHeader": {"type": "object"},
+    "MPItem": {"type": "array", "items": {"type": "object", "required": ["Orderable", "Visible"],
+      "properties": {
+        "Orderable": {"type": "object", "required": ["sku", "productIdentifiers", "price"],
+          "properties": {
+            "sku": {"type": "string", "maxLength": 50, "description": "Seller SKU"},
+            "productIdentifiers": {"type": "object", "required": ["productIdType", "productId"],
+              "properties": {"productIdType": {"type": "string", "enum": ["UPC", "GTIN", "EAN"]}, "productId": {"type": "string", "minLength": 12}}},
+            "price": {"type": "number", "minimum": 0},
+            "ShippingWeight": {"type": "number"},
+            "variantGroupId": {"type": "string"},
+            "isPrimaryVariant": {"type": "string", "enum": ["Yes", "No"]}
+          }},
+        "Visible": {"type": "object", "properties": {
+          "Swimwear": {"type": "object", "required": ["productName", "shortDescription", "color", "brand", "mainImageUrl"],
+            "properties": {
+              "productName": {"type": "string", "maxLength": 200},
+              "shortDescription": {"type": "string", "maxLength": 4000},
+              "color": {"type": "string"},
+              "colorCategory": {"type": "array", "items": {"type": "string", "enum": ["Black", "Blue", "Pink", "White", "Multi-Color"]}},
+              "brand": {"type": "string"},
+              "fabricContent": {"type": "array", "items": {"type": "object"}},
+              "mainImageUrl": {"type": "string", "format": "uri"},
+              "clothingSize": {"type": "string", "enum": ["XS", "S", "M", "L", "XL"]}
+            }}}}
+      }}}
+  }
+}

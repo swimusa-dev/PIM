@@ -142,6 +142,16 @@ Optional: set `app_compute_size: LARGE` once PLT-00 step 1 confirms Large comput
 
 Check the Shopify store domain in `app.yaml` (`PIM_SHOPIFY_STORE_DOMAIN`).
 
+Phase 3 feature flags in `app.yaml`, all off by default:
+
+| Variable | Default | Turn on when |
+|---|---|---|
+| `PIM_FEATURE_SHOPIFY_DIRECT_WRITE` | false | D-03 and owner approval for EXP-07; until then a Shopify publish builds an EXP-13 package |
+| `PIM_FEATURE_CHANNEL_SEND` | false | Phase 5 marketplace credentials and sandbox tests exist; until then publishes validate, write the payload files and record history, and nothing is sent |
+| `PIM_FEATURE_IMAGE_AI_MATCH` | false | PLT-00 step 8 confirms the vision endpoint and Air semantic search; enables tier 3 image candidates |
+
+`PIM_PUBLISH_VOLUME` is optional; publish payloads and job-rendered images default to the package volume.
+
 ---
 
 ## 5. Deploy
@@ -151,7 +161,7 @@ databricks auth login --host https://adb-<id>.<n>.azuredatabricks.net
 scripts/deploy.sh dev
 ```
 
-The script builds the frontend into `backend/pim/static/`, validates and deploys the bundle (five jobs and the
+The script builds the frontend into `backend/pim/static/`, validates and deploys the bundle (ten jobs and the
 app definition with its resources), and starts the app. The first start:
 
 - creates the schema in Lakebase if it is empty (the app runs `create_all` on startup) and loads `seeds/*.yml`
@@ -167,7 +177,7 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
 
 ## 6. First data load
 
-1. Run the bootstrap job once so Alembic applies the migrations (baseline and Phase 2):
+1. Run the bootstrap job once so Alembic applies the migrations (baseline, Phase 2 and Phase 3):
    `databricks bundle run pim_bootstrap -t dev`
 2. Run the Style Master ingest: `databricks bundle run pim_style_master_ingest -t dev`, or in the app:
    **Admin > Telemetry > Run ingest now**. The run creates styles, style-colors, and SKUs, maps ERP option
@@ -234,12 +244,57 @@ stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves th
   products across at least 3 brand scopes, no suspicious constants) or an admin forces activation with a reason.
   On-save rules run inside the save request; on-import rules after each commit; nightly rules in the job.
 
-## 9. Images from Air (IMG-01 to IMG-06)
+## 8b. Channel exports (EXP-02, EXP-04, EXP-05, EXP-06, EXP-12)
+
+1. **Admin > Channels > Configure > Target schema**: upload the retailer's spec and press **Refresh schema**.
+   Walmart takes the MP_ITEM spec JSON for one product type (set the product type), Nordstrom takes the Mirakl
+   PM11 and VL11 exports (CSV files or one ZIP), Shopify takes a saved `metafieldDefinitions` query result (the
+   fixed product CSV columns load without a file), retailer feeds take the XLSX template (header row, optional
+   hint row with `required`, `number`, `date` or `A|B|C` choices). The diff panel shows what changed since the last
+   load; required additions and removals are flagged.
+2. **Mapping**: map each target field to an attribute (or `core.<field>` / `erp.<field>`), add transforms, and
+   save. The gaps box lists required fields without a mapping and mapped fields the schema no longer has.
+   Select values use the option value's per-channel wording (Admin > Option lists, DM-14) before the label.
+3. **Exports page**: pick the channel, run a **Dry run** on a saved view, pasted ids or changed-since; open the
+   run for the payload preview, the validation report and the item list (issues link to the product and
+   attribute). **Publish** needs the channel's run right: for Shopify it creates an EXP-13 package; for feed
+   channels it writes the file for download; for API channels it stays validate-only until
+   `PIM_FEATURE_CHANNEL_SEND` is on.
+4. **Feedback**: on a publish, upload the retailer's error report (CSV, JSON or XLSX with a product id column and
+   a message column) or press **Poll adapter**. Messages are mapped to attributes through the channel mapping and
+   tagged internal (fix in the PIM) or external (retailer side); rejections notify the channel's owning role
+   (`config.owner_role`, default `ecommerce`). **Health** shows the 30-day acceptance score and top errors.
+5. **Schedule**: enable delta or full runs every N hours or daily at a time (scoped to a saved view), then
+   unpause the `pim_channel_export` job (hourly check; it also polls feedback for submitted batches). A channel
+   with a run in progress is skipped. **Run now** triggers the job or, locally, runs inline.
+6. **Eligibility override** (EXP-12): an ineligible product is skipped from every run. A PIM Admin can force it
+   from the product's readiness panel with a reason and optional expiry; the override is logged.
+
+---
+
+## 9. Images from Air (IMG-01 to IMG-07)
 
 Set `PIM_AIR_WORKSPACE_ID` and `PIM_AIR_BOARDS` (comma-separated board ids to poll) in `app.yaml`, keep the API
 key in the secret scope, then unpause the `pim_air_poll` job. Tier 1 and 2 matches confirm automatically when the
 filename or Air fields resolve a style-color and a shot type; everything else appears under **Images** for review.
 Filename patterns are admin data (`seeds/images.yml`, table `filename_pattern`).
+
+Phase 3 additions:
+
+- **Ordering and rules (IMG-05)**: reorder confirmed links on the product's images panel (the first is the main
+  image). Each link shows the channels whose technical rules it fails (`image_rules` on the requirement set:
+  `min_width`, `min_height`, `max_width`, `aspect_ratio` such as `4:5`, `max_aspect_delta`, `formats`,
+  `reject_ai_generated`). **Images > Failing rules** lists them per channel.
+- **Write-back (IMG-06)**: confirming a link writes Style Number, Color Code and Shot Type to the asset's Air
+  custom fields, best effort (no Air key, no block). Confirm the field names in PLT-00 step 7 and adjust
+  `write_back_to_air` if they differ. The **AI generated** toggle per asset also writes `AI Generated`.
+- **Tier 3 candidates (IMG-03)**: **Ask AI for candidates** on an unparsed asset runs Air semantic search for
+  confirmed neighbors and a vision call that reads visible codes; results are proposals only. Needs
+  `PIM_FEATURE_IMAGE_AI_MATCH=true` and a vision-capable classify endpoint (`PIM_AI_ENDPOINT_CLASSIFY`).
+- **Renditions (IMG-07)**: set the channel's image profile (Admin > Channels > Image profile), then
+  **Create for channel** on a link or **Refresh renditions** from the API. Air CDN transforms serve the
+  derivative without storing a copy; when Air is unavailable the row is queued and the `pim_renditions` job
+  resizes with Pillow into the publish volume.
 
 ---
 
@@ -252,7 +307,9 @@ databricks bundle run pim_bootstrap -t dev   # applies Alembic migrations and re
 ```
 
 Schema changes: edit the models, run `alembic revision --autogenerate -m "<message>"` against a local database,
-review the file in `migrations/versions/`, commit it.
+review the file in `migrations/versions/`, commit it. Phase 3 is migration `f2ec7848d5b7` (new tables
+`publish_item`, `eligibility_override`, `image_rendition`; new columns on `channel` and `publish_record` with
+server defaults so existing rows upgrade in place).
 
 ---
 
