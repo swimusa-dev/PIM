@@ -98,14 +98,17 @@ def delta_candidates(session: Session, meta: Metadata, channel: Channel, base: l
     if not ids:
         return []
     by_id = {e.id: e for e in base}
-    parents = {e.parent_id: e.id for e in base if e.parent_id}
+    parents: dict[str, list[str]] = {}
+    for e in base:
+        if e.parent_id:
+            parents.setdefault(e.parent_id, []).append(e.id)  # a style change touches every colorway under it
     reasons: dict[str, list[str]] = {}
     if since is None:
         return [{"entity_id": e.id, "label": e.label, "reasons": ["Never published to this channel"]} for e in base]
     for pv in session.execute(select(ProductValue.entity_id, ProductValue.attribute_code).where(
             ProductValue.entity_id.in_(ids + list(parents)), ProductValue.set_at >= since, ProductValue.approval_state == "approved")):
-        target = pv.entity_id if pv.entity_id in by_id else parents.get(pv.entity_id)
-        if target:
+        targets = [pv.entity_id] if pv.entity_id in by_id else parents.get(pv.entity_id, [])
+        for target in targets:
             reasons.setdefault(target, []).append(f"{pv.attribute_code} changed")
     for lk in session.execute(select(AssetLink).where(AssetLink.entity_id.in_(ids), AssetLink.decided_at >= since)).scalars():
         reasons.setdefault(lk.entity_id, []).append(f"image {lk.shot_type or lk.asset_id} {lk.status}")
@@ -144,9 +147,9 @@ def execute_run(session: Session, meta: Metadata, channel: Channel, rec: Publish
     try:
         entities = resolve_selection(session, rec.selection or {})
         if rec.mode == "delta":
-            delta = {d["entity_id"] for d in delta_candidates(session, meta, channel, entities or None)}
-            entities = [e for e in (entities or session.execute(select(ProductEntity).where(ProductEntity.id.in_(delta))).scalars().all())
-                        if e.id in delta]
+            # The selection is the ceiling: an empty selection is an empty run, never the whole catalogue.
+            delta = {d["entity_id"] for d in delta_candidates(session, meta, channel, entities)}
+            entities = [e for e in entities if e.id in delta]
         entities, skipped = eligible_entities(session, meta, channel, entities)
         schema = TargetSchema.from_dict(channel.target_schema)
         rends = _renditions_for(session, channel, entities)
@@ -209,14 +212,14 @@ def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord
         session.add(pkg)
         session.flush()
         rec.package_id = pkg.id
-        rec.summary["package_id"] = pkg.id
+        rec.summary = {**(rec.summary or {}), "package_id": pkg.id}  # reassign: plain JSON columns do not track in-place edits
         rec.status = "completed"
         for p in valid:
             items[p.entity_id].status = "submitted"
         return
     if transport == "download" or not send or not getattr(get_settings(), "feature_channel_send", False):
         rec.status = "completed"
-        rec.summary["delivery"] = "download" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"
+        rec.summary = {**(rec.summary or {}), "delivery": "download" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"}
         return
     adapter = adapter_for(channel)
     try:
@@ -226,7 +229,7 @@ def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord
         return
     rec.external_batch_id = res.batch_id
     rec.status = "submitted"
-    rec.summary["delivery"] = {"batch_id": res.batch_id, "accepted": res.accepted, "rejected": res.rejected, **res.detail}
+    rec.summary = {**(rec.summary or {}), "delivery": {"batch_id": res.batch_id, "accepted": res.accepted, "rejected": res.rejected, **res.detail}}
     for p in valid:
         items[p.entity_id].status = "submitted"
 
@@ -254,6 +257,9 @@ ID_KEYS = ("external_id", "sku", "product id", "productid", "item id", "itemid",
 MSG_KEYS = ("message", "error", "errors", "description", "reason", "ingestion errors", "error message", "detail", "issue")
 FIELD_KEYS = ("field", "attribute", "attribute code", "attribute_code", "column", "property", "path")
 STATUS_KEYS = ("status", "state", "result", "ingestion status")
+ACCEPTED_WORDS = ("accepted", "success", "successful", "published", "ok", "live", "active", "processed")
+REJECTED_WORDS = ("rejected", "error", "errors", "failed", "fail", "unpublished")
+REVIEW_WORDS = ("in_review", "in review", "review", "pending", "processing", "in progress", "in_progress")
 
 
 def parse_feedback_file(name: str, content: bytes) -> list[dict]:
@@ -346,17 +352,18 @@ def apply_feedback(session: Session, meta: Metadata, channel: Channel, rec: Publ
             continue
         msg = r.get("message") or ""
         status = (r.get("status") or "").lower()
-        if msg:
+        # The retailer's status wins; a message only decides when no status says otherwise (an accepted row can
+        # carry an informational message and must stay accepted).
+        if status in ACCEPTED_WORDS:
+            item.status = "accepted"
+        elif status in REVIEW_WORDS:
+            item.status = "in_review"
+        elif status in REJECTED_WORDS or msg:
+            item.status = "rejected"
+        if msg and item.status != "accepted":
             kind, attr = classify_error(msg, r.get("field"), channel)
             item.errors = [*(item.errors or []), {"message": msg[:500], "field": r.get("field"), "attribute_code": attr, "kind": kind,
                                                   "source": source, "at": utcnow().isoformat()}]
-            item.status = "rejected" if status not in ("in_review", "pending", "review", "processing") else "in_review"
-        elif status in ("accepted", "success", "published", "ok", "live", "active"):
-            item.status = "accepted"
-        elif status in ("rejected", "error", "failed", "fail"):
-            item.status = "rejected"
-        elif status in ("in_review", "review", "pending", "processing"):
-            item.status = "in_review"
         touched.add(item.id)
     for item in items:
         if item.id in touched:
@@ -438,25 +445,45 @@ def schedule_out(channel: Channel) -> dict:
     return {**DEFAULT_SCHEDULE, **(channel.schedule or {})}
 
 
+def validate_schedule(sched: dict) -> str | None:
+    """Returns the reason a schedule is invalid, or None. Used by the API and defensively by the job."""
+    if sched.get("mode") not in (None, "delta", "full"):
+        return "mode must be delta or full"
+    eh, ah, am = sched.get("every_hours"), sched.get("at_hour"), sched.get("at_minute")
+    if eh is not None and (not isinstance(eh, (int, float)) or isinstance(eh, bool) or eh <= 0):
+        return "every_hours must be greater than zero"
+    if ah is not None and (not isinstance(ah, int) or isinstance(ah, bool) or not 0 <= ah <= 23):
+        return "at_hour must be 0 to 23"
+    if am is not None and (not isinstance(am, int) or isinstance(am, bool) or not 0 <= am <= 59):
+        return "at_minute must be 0 to 59"
+    if sched.get("enabled") and not eh and ah is None:
+        return "Set every_hours or at_hour to enable the schedule"
+    return None
+
+
 def schedule_due(sched: dict, now: datetime | None = None) -> bool:
-    if not sched.get("enabled"):
+    """A malformed schedule is never due (and never raises), so one bad channel cannot abort the job."""
+    if not sched.get("enabled") or validate_schedule(sched):
         return False
     now = now or utcnow()
-    last = sched.get("last_run_at")
-    last_dt = datetime.fromisoformat(last) if last else None
-    if sched.get("every_hours"):
-        return last_dt is None or now - last_dt >= timedelta(hours=float(sched["every_hours"]))
-    if sched.get("at_hour") is not None:
-        try:
-            from zoneinfo import ZoneInfo
+    try:
+        last = sched.get("last_run_at")
+        last_dt = datetime.fromisoformat(last) if last else None
+        if sched.get("every_hours"):
+            return last_dt is None or now - last_dt >= timedelta(hours=float(sched["every_hours"]))
+        if sched.get("at_hour") is not None:
+            try:
+                from zoneinfo import ZoneInfo
 
-            local = now.astimezone(ZoneInfo(sched.get("timezone") or "America/New_York"))
-        except Exception:  # noqa: BLE001
-            local = now
-        due_today = local.replace(hour=int(sched["at_hour"]), minute=int(sched.get("at_minute") or 0), second=0, microsecond=0)
-        if local < due_today:
-            return False
-        return last_dt is None or last_dt.astimezone(local.tzinfo) < due_today
+                local = now.astimezone(ZoneInfo(sched.get("timezone") or "America/New_York"))
+            except Exception:  # noqa: BLE001
+                local = now
+            due_today = local.replace(hour=int(sched["at_hour"]), minute=int(sched.get("at_minute") or 0), second=0, microsecond=0)
+            if local < due_today:
+                return False
+            return last_dt is None or last_dt.astimezone(local.tzinfo) < due_today
+    except (TypeError, ValueError) as exc:
+        log.warning("schedule ignored, invalid values: %s", exc)
     return False
 
 

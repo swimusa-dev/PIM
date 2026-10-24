@@ -461,6 +461,8 @@ export interface ImageQueue {
 export interface ProductImages {
   slots: { shot_type: string; required_by: string[]; link?: ImageLink | null }[];
   candidates: ImageLink[];
+  // Phase 3: every non-rejected link in sort order (slots keep one link per shot type; ordering needs them all).
+  links?: ImageLink[];
   // Phase 3: the technical image rules per channel (shape owned by the backend, rendered as key/value).
   rules?: Record<string, Record<string, unknown>>;
 }

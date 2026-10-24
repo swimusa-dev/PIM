@@ -23,8 +23,11 @@ export function ImagesPanel({ entityId }: { entityId: string }) {
   const [showRules, setShowRules] = useState(false);
 
   const confirmed = useMemo(() => {
-    const links = (q.data?.slots ?? []).map((s) => s.link).filter((l): l is ImageLink => !!l && l.status === "confirmed");
-    return links.sort((a, b) => a.sort_order - b.sort_order);
+    // The links array carries every confirmed link (two links can share a shot type, or have none); slots only
+    // keep one per shot type, so ordering is derived from links and falls back to slots for older responses.
+    const source = q.data?.links ?? (q.data?.slots ?? []).map((s) => s.link);
+    const links = source.filter((l): l is ImageLink => !!l && l.status === "confirmed");
+    return [...links].sort((a, b) => a.sort_order - b.sort_order);
   }, [q.data]);
 
   const reorder = useMutation({

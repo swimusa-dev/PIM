@@ -81,12 +81,10 @@ async def refresh_schema(code: str, file: UploadFile | None = None, product_type
     ch.target_schema = schema.as_dict()
     ch.last_schema_diff = {**diff, "at": utcnow().isoformat(), "by": user.email}
     if ch.adapter == "walmart_mp" and files:
-        import json
-
-        try:
-            ch.config = {**(ch.config or {}), "raw_schema": json.loads(next(iter(files.values())).decode("utf-8-sig"))}
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            pass
+        # The raw spec is several MB: keep it on the volume for JSON Schema validation, never in channel.config
+        # (which every channels response and the metadata cache carry).
+        full = publishing.storage().write(f"schemas/{code}/walmart_spec.json", next(iter(files.values())))
+        ch.config = {k: v for k, v in (ch.config or {}).items() if k != "raw_schema"} | {"raw_schema_path": full}
     ch.version += 1
     session.add(AppEvent(kind="schema_refresh", source="exports", user_email=user.email, payload={"channel": code, "added": len(diff["added"]),
                                                                            "removed": len(diff["removed"]), "source": schema.source}))
@@ -291,12 +289,9 @@ def get_schedule(code: str, session: Session = Depends(get_session), user: Curre
 def put_schedule(code: str, body: ScheduleBody, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
     _require_edit_profile(user, code)
     ch = _channel(session, code)
-    if body.mode not in ("delta", "full"):
-        raise HTTPException(400, "mode must be delta or full")
-    if body.enabled and not body.every_hours and body.at_hour is None:
-        raise HTTPException(400, "Set every_hours or at_hour to enable the schedule")
-    if body.at_hour is not None and not 0 <= body.at_hour <= 23:
-        raise HTTPException(400, "at_hour must be 0 to 23")
+    problem = publishing.validate_schedule(body.model_dump())
+    if problem:
+        raise HTTPException(400, problem)
     ch.schedule = {**publishing.schedule_out(ch), **body.model_dump()}
     session.commit()
     invalidate()

@@ -558,3 +558,151 @@ def test_phase3_api_eligibility_override_and_images(client, session, meta, admin
     rr = client.get("/api/images/assets/api1/renditions?channel=nordstrom", headers=ADMIN).json()
     assert rr[0]["source"] == "pending"  # no Air key locally, queued for the job
     assert client.post("/api/images/renditions/refresh", json={"channel_code": "nordstrom"}, headers=ADMIN).json()["queued"] == 1
+
+
+# ---------------------------------------------------------------------------------------------------
+# Review fixes (PR #3)
+# ---------------------------------------------------------------------------------------------------
+def test_review_summary_package_id_is_persisted(session, meta, admin, ingested):
+    ch = session.get(Channel, "shopify-vitamina")
+    fvp = _sc(session)
+    rec = publishing.start_run(session, ch, "publish", "full", admin.email, {"entity_ids": [fvp.id]})
+    publishing.execute_run(session, meta, ch, rec, send=True)
+    session.commit()
+    session.expire_all()
+    fresh = session.get(PublishRecord, rec.id)
+    assert fresh.summary["package_id"] == fresh.package_id  # survives the reload, not only the in-memory dict
+
+
+def test_review_walmart_payload_nests_by_path_and_runs_json_schema(session, meta, admin, ingested):
+    ch = session.get(Channel, "walmart-mp")
+    ch.target_schema = load_walmart_spec((P3 / "walmart_spec_v1.json").read_bytes(), "Swimwear").as_dict()
+    ch.config = {**ch.config, "file_format": "json",
+                 "raw_schema_path": publishing.storage().write("schemas/walmart-mp/walmart_spec.json", (P3 / "walmart_spec_v1.json").read_bytes())}
+    ch.attribute_mapping = {"product_title": "productName", "product_description": "shortDescription", "customer_color_name": "color",
+                            "core.style_number": "productId", "core.color_code": "sku", "erp_brand_name": "brand"}
+    fvp = _sc(session)
+    _set_ready(session, meta, admin, fvp)
+    set_value(session, meta, admin, fvp, meta.attributes["customer_color_name"], "Festival Pink")
+    session.flush()
+    p = build_payloads(session, meta, ch, [fvp])[0]
+    kinds = {(i.kind, i.field) for i in p.issues}
+    assert ("missing_required", "productIdType") in kinds and ("missing_required", "mainImageUrl") in kinds
+    assert any(i.kind == "schema" and i.field == "productId" and "too short" in i.message for i in p.issues)  # minLength from the raw spec
+    assert ("missing_required", "price") in kinds  # nested requirement only the raw spec knows
+    files = {n: c for n, c, _k in payload_files(ch, [p], TargetSchema.from_dict(ch.target_schema))}
+    p.issues = []  # force the file to include the product so the nesting can be checked
+    files = {n: c for n, c, _k in payload_files(ch, [p], TargetSchema.from_dict(ch.target_schema))}
+    import json as _json
+
+    feed = _json.loads(files["payload.json"])
+    item = feed["MPItem"][0]
+    assert item["Orderable"]["sku"] == "FVP" and item["Orderable"]["productIdentifiers"]["productId"] == "200809"
+    assert item["Visible"]["Swimwear"]["productName"] == "Skylar Top"
+
+
+def test_review_delta_style_change_flags_every_colorway(session, meta, admin, ingested):
+    ch = _configure_nordstrom(session, meta, admin)
+    fvp, ecb = _sc(session), _sc(session, "200809", "ECB")
+    for sc in (fvp, ecb):
+        _set_ready(session, meta, admin, sc, color_family="black")
+    rec = publishing.start_run(session, ch, "publish", "full", admin.email, {"entity_ids": [fvp.id, ecb.id]})
+    publishing.execute_run(session, meta, ch, rec, send=True)
+    for i in session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars():
+        i.status = "accepted"
+    rec.finished_at = utcnow()
+    session.commit()
+    style = session.get(ProductEntity, fvp.parent_id)
+    set_value(session, meta, admin, style, meta.attributes["product_description"], "<p>Updated at the style.</p>")
+    session.commit()
+    delta = publishing.delta_candidates(session, meta, ch, [fvp, ecb])
+    assert {d["entity_id"] for d in delta} == {fvp.id, ecb.id}
+    assert all("product_description changed" in d["reasons"] for d in delta)
+
+
+def test_review_delta_run_never_falls_back_to_the_catalogue(session, meta, admin, ingested):
+    ch = _configure_nordstrom(session, meta, admin)
+    rec = publishing.start_run(session, ch, "publish", "delta", admin.email, {"entity_ids": ["does-not-exist"]})
+    publishing.execute_run(session, meta, ch, rec, send=True)
+    assert rec.status == "completed" and rec.product_count == 0
+
+
+def test_review_feedback_status_wins_over_informational_message(session, meta, admin, ingested):
+    ch = _configure_nordstrom(session, meta, admin)
+    fvp = _sc(session)
+    _set_ready(session, meta, admin, fvp, color_family="black")
+    rec = publishing.start_run(session, ch, "publish", "full", admin.email, {"entity_ids": [fvp.id]})
+    publishing.execute_run(session, meta, ch, rec, send=True)
+    result = publishing.apply_feedback(session, meta, ch, rec, [{"external_id": "200809-FVP", "status": "accepted", "message": "Item published", "field": None}])
+    item = session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalar_one()
+    assert result["accepted"] == 1 and result["rejected"] == 0 and item.status == "accepted" and item.errors == []
+    assert session.execute(select(Notification).where(Notification.kind == "publish_rejected")).first() is None
+    publishing.apply_feedback(session, meta, ch, rec, [{"external_id": "200809-FVP", "status": "in review", "message": "Pending category check", "field": None}])
+    assert item.status == "in_review" and item.errors[0]["kind"] == "external"
+
+
+def test_review_schedule_validation_and_robust_due_check():
+    assert publishing.validate_schedule({"enabled": True, "at_hour": 9, "at_minute": 75}) == "at_minute must be 0 to 59"
+    assert publishing.validate_schedule({"enabled": True, "every_hours": 0}) == "every_hours must be greater than zero"
+    assert publishing.validate_schedule({"enabled": True, "every_hours": -1}) is not None
+    assert publishing.validate_schedule({"enabled": True, "at_hour": 24}) == "at_hour must be 0 to 23"
+    assert publishing.validate_schedule({"enabled": False}) is None
+    # a malformed schedule stored before validation existed is skipped, never raises inside the job
+    assert publishing.schedule_due({"enabled": True, "at_hour": 9, "at_minute": 75, "timezone": "America/New_York"}) is False
+    assert publishing.schedule_due({"enabled": True, "every_hours": 1, "last_run_at": "not a date"}) is False
+
+
+def test_review_walmart_loader_reports_missing_visible_section():
+    import json as _json
+
+    spec = {"properties": {"MPItem": {"items": {"properties": {"Orderable": {"type": "object", "properties": {"sku": {"type": "string"}}}}}}}}
+    with pytest.raises(SchemaLoadError, match="no Visible section"):
+        load_walmart_spec(_json.dumps(spec).encode(), "Swimwear")
+
+
+def test_review_build_payloads_query_count_is_bounded(session, meta, admin, ingested):
+    from sqlalchemy import event
+
+    from pim.models import ReferenceEntity
+
+    ch = _configure_nordstrom(session, meta, admin)
+    fabric = ReferenceEntity(type_code="fabric", code="ecorib", label="EcoRib")
+    session.add(fabric)
+    session.flush()
+    pseudo = ProductEntity(id=fabric.id, level="ref:fabric", style_number="ecorib", label="EcoRib")
+    set_value(session, meta, admin, pseudo, meta.attributes["fabric_care"], "hand_wash_cold_dry_flat")
+    ents = []
+    for color in ("FVP", "ECB"):
+        sc = _sc(session, "200809", color)
+        _set_ready(session, meta, admin, sc, color_family="black")
+        set_value(session, meta, admin, sc, meta.attributes["fabric"], fabric.id)
+        for i, shot in enumerate(["front", "back"]):
+            session.add(AssetLink(asset_id=_asset(session, f"q-{color}-{i}", f"200809-{color}_{shot}.jpg").id, entity_id=sc.id, shot_type=shot, status="confirmed"))
+        ents.append(sc)
+    session.flush()
+    count = {"n": 0}
+
+    def _count(*_a, **_k):
+        count["n"] += 1
+
+    bind = session.get_bind()
+    event.listen(bind, "before_cursor_execute", _count)
+    try:
+        payloads = build_payloads(session, meta, ch, ents)
+    finally:
+        event.remove(bind, "before_cursor_execute", _count)
+    assert len(payloads) == 2 and payloads[0].data["Care"].startswith("HAND WASH COLD")
+    assert count["n"] <= 6, count["n"]  # entities, values, styles, reference values, links with assets: not per product
+
+
+def test_review_walmart_raw_spec_lives_on_the_volume(client, session):
+    r = client.post("/api/channels/walmart-mp/schema/refresh?product_type=Swimwear", headers=ADMIN,
+                    files={"file": ("spec.json", (P3 / "walmart_spec_v1.json").read_bytes())})
+    assert r.status_code == 200, r.text
+    ch = session.get(Channel, "walmart-mp")
+    session.refresh(ch)
+    assert "raw_schema" not in ch.config and ch.config["raw_schema_path"].endswith("walmart_spec.json")
+    chans = {c["code"]: c for c in client.get("/api/metadata/channels", headers=VIEWER).json()}
+    assert "raw_schema" not in chans["walmart-mp"]["config"]
+    assert client.post("/api/channels/walmart-mp/schema/refresh?product_type=Shoes", headers=ADMIN,
+                       files={"file": ("spec.json", (P3 / "walmart_spec_v1.json").read_bytes())}).status_code == 400

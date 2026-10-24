@@ -16,7 +16,7 @@ from fractions import Fraction
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from pim.adapters.base import NotConfigured
 from pim.config import get_settings
@@ -80,7 +80,8 @@ def rule_failures_for(meta: Metadata, asset: Asset, family_code: str | None) -> 
 
 
 def failing_rules_queue(session: Session, meta: Metadata, channel_code: str | None, page: int, page_size: int) -> dict:
-    links = session.execute(select(AssetLink).where(AssetLink.status == "confirmed").order_by(AssetLink.created_at.desc())).scalars().all()
+    links = session.execute(select(AssetLink).options(selectinload(AssetLink.asset)).where(AssetLink.status == "confirmed")
+                            .order_by(AssetLink.created_at.desc())).scalars().all()
     ents = {e.id: e for e in session.execute(select(ProductEntity).where(ProductEntity.id.in_({lk.entity_id for lk in links}))).scalars()} if links else {}
     rows = []
     for lk in links:

@@ -127,8 +127,8 @@ def load_walmart_spec(content: bytes, product_type: str | None = None) -> Target
         node = item
         visible = (item.get("properties") or {}).get("Visible") or {}
         types = list((visible.get("properties") or {}).keys())
-        if product_type and product_type not in types and types:
-            raise SchemaLoadError(f"Product type {product_type!r} not in spec; available: {', '.join(types[:20])}")
+        if product_type and product_type not in types:
+            raise SchemaLoadError(f"Product type {product_type!r} not in spec; available: {', '.join(types[:20]) or 'none (no Visible section)'}")
         if not product_type and len(types) == 1:
             product_type = types[0]
         if product_type:

@@ -12,19 +12,22 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from pim.export.schema_loaders import TargetField, TargetSchema
-from pim.export.shopify_package import CLEAR, _channel_ready_value
+from pim.export.shopify_package import CLEAR, _display_value
 from pim.models import AssetLink, Channel, ProductEntity, ProductValue
 from pim.services.metadata import Metadata
 from pim.services.rules import eval_condition
+
+log = logging.getLogger(__name__)
 
 CORE_FIELDS = ("style_number", "color_code", "size", "sku", "upc", "label", "lifecycle_status", "family_code", "entity_type")
 UNIT_FACTORS = {("in", "cm"): 2.54, ("cm", "in"): 1 / 2.54, ("oz", "g"): 28.3495, ("g", "oz"): 1 / 28.3495,
@@ -90,14 +93,52 @@ def _core(ent: ProductEntity, style: ProductEntity | None, name: str) -> Any:
     return erp.get(name)
 
 
-def resolve_source(session: Session, meta: Metadata, channel: Channel, ent: ProductEntity, style: ProductEntity | None,
-                   merged: dict[tuple[str, str], ProductValue], source: str) -> tuple[Any, str | None]:
+RefValues = dict[tuple[str, str], ProductValue]  # (reference entity id, attribute code) -> global value
+
+
+def load_ref_values(session: Session, meta: Metadata, values: dict[str, dict[tuple[str, str], ProductValue]]) -> RefValues:
+    """One query for every referenced entity's values (fabric.*, print.*) instead of a lookup per product and path."""
+    ref_ids: set[str] = set()
+    for per_entity in values.values():
+        for (code, _ch), pv in per_entity.items():
+            attr = meta.attributes.get(code)
+            if attr is not None and attr.data_type == "reference_entity" and pv.value_ref:
+                ref_ids.add(pv.value_ref)
+    out: RefValues = {}
+    if ref_ids:
+        for pv in session.execute(select(ProductValue).where(ProductValue.entity_id.in_(ref_ids), ProductValue.channel_code == "")).scalars():
+            out[(pv.entity_id, pv.attribute_code)] = pv
+    return out
+
+
+def ready_value(meta: Metadata, merged: dict[tuple[str, str], ProductValue], path: str, channel_code: str,
+                refs: RefValues) -> tuple[Any, ProductValue | None]:
+    """Same rules as shopify_package._channel_ready_value (approved only, no unconfirmed defaults, channel override
+    wins) without per-call queries: reference paths resolve through the preloaded `refs`."""
+    code, _, inner = path.partition(".")
+    pv = merged.get((code, channel_code)) or merged.get((code, ""))
+    if pv is None or pv.approval_state != "approved" or (pv.source_type == "default" and not pv.confirmed_default):
+        return None, pv
+    if pv.not_applicable:
+        return CLEAR, pv
+    if inner:
+        if not pv.value_ref:
+            return None, pv
+        inner_pv = refs.get((pv.value_ref, inner))
+        if inner_pv is None:
+            return None, pv
+        return _display_value(meta, inner, inner_pv), inner_pv
+    return _display_value(meta, code, pv), pv
+
+
+def resolve_source(meta: Metadata, channel: Channel, ent: ProductEntity, style: ProductEntity | None,
+                   merged: dict[tuple[str, str], ProductValue], source: str, refs: RefValues) -> tuple[Any, str | None]:
     """A mapping source is `attr`, `ref_attr.inner`, `core.<field>` or `erp.<field>`. Returns (value, attribute_code)."""
     if source.startswith("core.") or source.startswith("erp."):
         return _core(ent, style, source.split(".", 1)[1]), None
     if source in CORE_FIELDS and source not in meta.attributes:
         return _core(ent, style, source), None
-    v, pv = _channel_ready_value(session, meta, merged, source, channel.code)
+    v, pv = ready_value(meta, merged, source, channel.code, refs)
     if v is CLEAR:
         return None, source.split(".", 1)[0]
     attr = meta.attributes.get(source.rsplit(".", 1)[-1]) if "." in source else meta.attributes.get(source)
@@ -213,7 +254,7 @@ def _type_ok(f: TargetField, v: Any) -> bool:
     return True
 
 
-def validate_payload(p: ProductPayload, schema: TargetSchema | None, channel: Channel) -> None:
+def validate_payload(p: ProductPayload, schema: TargetSchema | None, channel: Channel, raw_schema: dict | None = None) -> None:
     if schema is None or not schema.fields:
         return
     for f in schema.fields:
@@ -246,32 +287,72 @@ def validate_payload(p: ProductPayload, schema: TargetSchema | None, channel: Ch
                                                  field=f.name, attribute_code=attr))
             except (TypeError, ValueError):
                 pass
-    if schema.source == "walmart_spec" and schema.raw_available:
-        _validate_jsonschema(p, channel)
+    if raw_schema and schema.source == "walmart_spec":
+        _validate_jsonschema(p, schema, raw_schema)
 
 
-def _validate_jsonschema(p: ProductPayload, channel: Channel) -> None:
-    """Walmart publishes real JSON Schema; when the raw spec is stored in channel.config we run it too."""
-    raw = (channel.config or {}).get("raw_schema")
-    if not raw:
-        return
+def load_raw_schema(channel: Channel) -> dict | None:
+    """The Walmart spec is kept on the volume (config.raw_schema_path); load it once per run."""
+    cfg = channel.config or {}
+    if isinstance(cfg.get("raw_schema"), dict):
+        return cfg["raw_schema"]
+    path = cfg.get("raw_schema_path")
+    if not path:
+        return None
+    try:
+        from pim.export.publishing import storage
+
+        return json.loads(storage().read(path).decode("utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("raw schema for %s could not be loaded from %s: %s", channel.code, path, exc)
+        return None
+
+
+def _validate_jsonschema(p: ProductPayload, schema: TargetSchema, raw: dict) -> None:
+    """Walmart publishes real JSON Schema; the item is validated as the nested MPItem the spec describes."""
     try:
         import jsonschema
     except ImportError:  # pragma: no cover
         return
-    validator = jsonschema.Draft7Validator(raw)
-    for err in validator.iter_errors(nest(p.data)):
+    item = nest(p.data, schema)
+    item_schema = raw
+    props = raw.get("properties") or {}
+    if "MPItem" in props:  # validate one item against the MPItem item schema, not the feed envelope
+        item_schema = {"$schema": raw.get("$schema", "http://json-schema.org/draft-07/schema#"), **(props["MPItem"].get("items") or {})}
+    try:
+        validator = jsonschema.Draft7Validator(item_schema)
+        errors = list(validator.iter_errors(item))
+    except jsonschema.exceptions.SchemaError as exc:  # noqa: BLE001
+        log.warning("Walmart spec is not a usable JSON Schema: %s", exc)
+        return
+    seen = {i.field for i in p.issues if i.field}
+    for err in errors:
         path = "/".join(str(x) for x in err.absolute_path)
-        if any(i.field and i.field in path for i in p.issues):
+        if err.validator == "required":  # report each missing property under its own name, like the flat check
+            present = err.instance if isinstance(err.instance, dict) else {}
+            for name in err.validator_value or []:
+                if name not in present and name not in seen:
+                    seen.add(name)
+                    p.issues.append(PayloadIssue(p.entity_id, p.label, f"{name} is required by the channel spec", "missing_required",
+                                                 field=name, attribute_code=p.sources.get(name)))
             continue
-        p.issues.append(PayloadIssue(p.entity_id, p.label, err.message[:300], "schema", field=path or None))
+        leaf = str(err.absolute_path[-1]) if err.absolute_path else (path or None)
+        key = f"{leaf}:{err.validator}"
+        if key in seen:
+            continue
+        seen.add(key)
+        p.issues.append(PayloadIssue(p.entity_id, p.label, err.message[:300], "schema", field=leaf, attribute_code=p.sources.get(leaf or "")))
 
 
-def nest(flat: dict[str, Any]) -> dict[str, Any]:
-    """Fields named with `/a/b` paths or `a.b` keys become nested objects for API channels."""
+def nest(flat: dict[str, Any], schema: TargetSchema | None = None) -> dict[str, Any]:
+    """Builds the nested object API channels expect. A field whose schema entry carries a JSON pointer `path`
+    (Walmart: /Orderable/sku, /Visible/Swimwear/productName) lands there; otherwise `/a/b` or `a.b` keys nest
+    by their own segments and plain names stay at the root."""
+    paths = {f.name: f.path for f in (schema.fields if schema else []) if f.path}
     out: dict[str, Any] = {}
     for k, v in flat.items():
-        parts = [x for x in re.split(r"[/.]", k) if x] if (k.startswith("/") or "." in k) else [k]
+        key = paths.get(k, k)
+        parts = [x for x in re.split(r"[/.]", key) if x] if (key.startswith("/") or "." in key) else [key]
         cur = out
         for part in parts[:-1]:
             cur = cur.setdefault(part, {})
@@ -286,10 +367,13 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
                    schema: TargetSchema | None = None, renditions: dict[str, list[dict]] | None = None) -> list[ProductPayload]:
     schema = schema or TargetSchema.from_dict(channel.target_schema)
     values, styles = load_entity_values(session, entities)
+    refs = load_ref_values(session, meta, values)
+    raw_schema = load_raw_schema(channel) if schema.source == "walmart_spec" else None
     links: dict[str, list[AssetLink]] = {}
     if entities:
-        for lk in session.execute(select(AssetLink).where(AssetLink.entity_id.in_([e.id for e in entities]),
-                                                          AssetLink.status == "confirmed").order_by(AssetLink.sort_order)).scalars():
+        for lk in session.execute(select(AssetLink).options(selectinload(AssetLink.asset))
+                                  .where(AssetLink.entity_id.in_([e.id for e in entities]), AssetLink.status == "confirmed")
+                                  .order_by(AssetLink.sort_order)).scalars():
             links.setdefault(lk.entity_id, []).append(lk)
     mapping: dict[str, str] = channel.attribute_mapping or {}
     out: list[ProductPayload] = []
@@ -302,12 +386,12 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
         flat: dict[str, Any] = {name: _core(ent, style, name) for name in CORE_FIELDS}
         for (code, ch), pv in merged.items():
             if ch in ("", channel.code) and pv.approval_state == "approved":
-                v, _ = _channel_ready_value(session, meta, merged, code, channel.code)
+                v, _ = ready_value(meta, merged, code, channel.code, refs)
                 flat[code] = None if v is CLEAR else v
         for source, target in mapping.items():
             if not target:
                 continue
-            v, attr = resolve_source(session, meta, channel, ent, style, merged, source)
+            v, attr = resolve_source(meta, channel, ent, style, merged, source, refs)
             p.data[target] = v
             if attr:
                 p.sources[target] = attr
@@ -328,7 +412,7 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
                              "rendition": bool(rend), "ai_generated": bool(lk.asset and lk.asset.ai_generated_image)})
         if wanted_shots and not p.images:
             p.issues.append(PayloadIssue(ent.id, ent.label, "No confirmed image for the channel's shot types", "image", severity="warning"))
-        validate_payload(p, schema, channel)
+        validate_payload(p, schema, channel, raw_schema)
         out.append(p)
     return out
 
@@ -350,12 +434,12 @@ def payload_files(channel: Channel, payloads: list[ProductPayload], schema: Targ
     files: list[tuple[str, bytes, str]] = []
     columns = [f.name for f in (schema.fields if schema else [])] or sorted({k for p in payloads for k in p.data})
     if fmt == "json":
-        body = [{"external_id": p.external_id, **nest(p.data), "images": p.images} for p in valid]
+        body = [{"external_id": p.external_id, **nest(p.data, schema), "images": p.images} for p in valid]
         if channel.adapter == "walmart_mp":
             from pim.adapters.walmart_mp import WalmartMarketplaceAdapter
 
-            feeds = WalmartMarketplaceAdapter().build_feed([{"orderable": nest(p.data).get("Orderable", {}),
-                                                              "visible": nest(p.data).get("Visible", {})} for p in valid])
+            feeds = WalmartMarketplaceAdapter().build_feed([{"orderable": nest(p.data, schema).get("Orderable", {}),
+                                                              "visible": nest(p.data, schema).get("Visible", {})} for p in valid])
             body = feeds[0] if len(feeds) == 1 else feeds
         files.append(("payload.json", json.dumps(body, indent=2, default=str).encode(), "payload"))
     elif fmt == "xlsx":
