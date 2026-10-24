@@ -179,7 +179,7 @@ export function BulkActionsDialog({
   })();
   const hasSelection = scope === "view" ? !!view : entityIds.length > 0;
 
-  const AttrPicker = ({ param, filter, placeholder = "Choose an attribute" }: { param: string; filter?: (a: AttributeDefinition) => boolean; placeholder?: string }) => (
+  const attrPicker = (param: string, filter?: (a: AttributeDefinition) => boolean, placeholder = "Choose an attribute") => (
     <select value={typeof params[param] === "string" ? (params[param] as string) : ""} onChange={(e) => setParam(param, e.target.value)}>
       <option value="">{placeholder}</option>
       {grouped.map(([g, list]) => {
@@ -197,7 +197,7 @@ export function BulkActionsDialog({
       })}
     </select>
   );
-  const ChannelPicker = () =>
+  const channelPicker = () =>
     attr?.channel_scopable ? (
       <label className="field">
         Channel (optional)
@@ -294,7 +294,7 @@ export function BulkActionsDialog({
                 <>
                   <label className="field">
                     Attribute
-                    <AttrPicker param="attribute_code" />
+                    {attrPicker("attribute_code")}
                   </label>
                   {kind === "set_value" && attr && (
                     <label className="field">
@@ -309,14 +309,14 @@ export function BulkActionsDialog({
                       <span className="help">{params.value !== undefined ? `Will set: ${displayValue(params.value, attr, listByCode) || "empty"}` : "Commit the value (Enter or leave the field) before previewing."}</span>
                     </label>
                   )}
-                  <ChannelPicker />
+                  {channelPicker()}
                 </>
               )}
               {(kind === "add_option" || kind === "remove_option") && (
                 <>
                   <label className="field">
                     Multi-select attribute
-                    <AttrPicker param="attribute_code" filter={(a) => a.data_type === "multi_select"} />
+                    {attrPicker("attribute_code", (a) => a.data_type === "multi_select")}
                   </label>
                   {attr && attr.option_list_code && (
                     <div>
@@ -347,7 +347,7 @@ export function BulkActionsDialog({
                 <>
                   <label className="field">
                     Text attribute
-                    <AttrPicker param="attribute_code" filter={(a) => a.data_type === "text" || a.data_type === "rich_text"} />
+                    {attrPicker("attribute_code", (a) => a.data_type === "text" || a.data_type === "rich_text")}
                   </label>
                   <div className="form-grid">
                     <label className="field">
@@ -386,7 +386,7 @@ export function BulkActionsDialog({
                   </label>
                   <label className="field">
                     To attribute
-                    <AttrPicker param="to_attribute" />
+                    {attrPicker("to_attribute")}
                   </label>
                 </div>
               )}
@@ -426,7 +426,7 @@ export function BulkActionsDialog({
                   </label>
                   <label className="field">
                     Target attribute
-                    <AttrPicker param="target_attribute" />
+                    {attrPicker("target_attribute")}
                   </label>
                   <label className="field">
                     Prompt template (optional)

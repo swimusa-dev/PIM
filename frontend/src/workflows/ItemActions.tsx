@@ -64,7 +64,7 @@ export function useWorkflowItemActions() {
   const cancel = useMutation({
     mutationFn: (id: string) => api.workflows.cancel(id),
     onSuccess: () => {
-      toast("Workflow item cancelled.", "ok");
+      toast("Workflow item canceled.", "ok");
       invalidate();
     },
   });

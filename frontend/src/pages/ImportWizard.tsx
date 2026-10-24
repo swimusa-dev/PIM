@@ -33,6 +33,9 @@ export function ImportWizardPage() {
 
   const stepFromUrl = params.get("step") as StepKey | null;
   const [step, setStep] = useState<StepKey>(stepFromUrl ?? "upload");
+  useEffect(() => {
+    if (stepFromUrl && STEPS.some((s) => s.key === stepFromUrl)) setStep(stepFromUrl);
+  }, [stepFromUrl]);
 
   // Default to the next step the status allows when no step is in the URL.
   useEffect(() => {
