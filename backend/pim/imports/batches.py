@@ -60,6 +60,35 @@ def add_file(session: Session, meta: Metadata, batch: ImportBatch, filename: str
     return added
 
 
+def reparse_files(session: Session, batch: ImportBatch, edits: list[dict], storage: Storage) -> None:
+    """Re-parse a staged file with a user-chosen header row (the detector is a guess; the person decides)."""
+    files = list(batch.files or [])
+    for e in edits:
+        idx = int(e.get("index", -1))
+        if not (0 <= idx < len(files)) or not files[idx].get("path"):
+            continue
+        new_header = int(e.get("header_row") or files[idx]["header_row"])
+        if new_header == files[idx]["header_row"] and e.get("group_header_row") == files[idx].get("group_header_row"):
+            continue
+        content = storage.read(files[idx]["path"])
+        parsed = [p for p in parse_upload(files[idx]["name"], content, new_header) if p.sheet == files[idx].get("sheet") or files[idx].get("sheet") is None]
+        if not parsed:
+            continue
+        pf = parsed[0]
+        if e.get("group_header_row") is not None:
+            pf.group_header_row = int(e["group_header_row"]) or None
+        for r in session.execute(select(ImportRow).where(ImportRow.batch_id == batch.id, ImportRow.file_index == idx)).scalars():
+            session.delete(r)
+        for i, raw in enumerate(pf.rows, start=pf.data_start_row):
+            session.add(ImportRow(batch_id=batch.id, file_index=idx, row_number=i, raw=raw, mapped={}))
+        entry = pf.as_dict(idx, files[idx].get("precedence", idx))
+        entry["path"] = files[idx]["path"]
+        files[idx] = entry
+    batch.files = files
+    session.flush()
+    session.expire(batch, ["rows"])
+
+
 def _apply_worksheet(session: Session, meta: Metadata, batch: ImportBatch, pf: ParsedFile) -> None:
     ws_id = str(pf.worksheet_meta.get("worksheet_id"))
     ws_export = session.get(WorksheetExport, ws_id)

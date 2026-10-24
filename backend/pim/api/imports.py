@@ -20,6 +20,7 @@ from pim.imports.batches import (
     apply_template,
     batch_out,
     create_batch,
+    reparse_files,
     row_out,
     rows_from_shopify,
     save_template,
@@ -93,6 +94,7 @@ class MappingBody(BaseModel):
     options: dict = {}
     template_id: str | None = None
     precedence: list[int] | None = None
+    files: list[dict] | None = None  # header-row edits from the Upload step: [{index, header_row, group_header_row}]
 
 
 class ValueMappingsBody(BaseModel):
@@ -262,6 +264,8 @@ def suggest(batch_id: str, session: Session = Depends(get_session), meta: Metada
 def put_mapping(batch_id: str, body: MappingBody, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
                 user: CurrentUser = Depends(require_permission("import"))) -> dict:
     batch = _batch_or_404(session, batch_id)
+    if body.files:
+        reparse_files(session, batch, body.files, _storage())
     if body.template_id:
         tpl = session.get(MappingTemplate, body.template_id)
         if tpl is None:
