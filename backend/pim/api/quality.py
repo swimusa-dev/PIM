@@ -51,8 +51,9 @@ def recompute(body: RecomputeBody | None = None, session: Session = Depends(get_
         raise HTTPException(403, "PIM Admin only")
     ids = (body.entity_ids if body else None) or []
     if ids:
+        # an explicit recompute is authoritative: it rebuilds the duplicate index instead of carrying the last result
         ents = session.execute(select(ProductEntity).where(ProductEntity.id.in_(ids))).scalars().all()
-        n = quality.refresh_quality(session, meta, ents)
+        n = quality.refresh_quality(session, meta, ents, quality.duplicate_index(session, meta))
         session.commit()
         return {"computed": n}
     from pim.services.jobs import trigger_job

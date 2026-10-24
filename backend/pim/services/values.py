@@ -482,11 +482,13 @@ def _sync_ai_outputs(session: Session, d: ValueDraft, user: CurrentUser, comment
 
     for o in session.execute(select(AiOutput).where(AiOutput.draft_id == d.id, AiOutput.status.in_(["proposed", "edited"]))).scalars():
         if d.state == "approved":
-            if o.status != "edited":
-                o.status = "accepted"
-            o.final_value = {"value": d.proposed.get("value")}
+            final = d.proposed.get("value")
+            o.final_value = {"value": final}
             if o.edit_distance is None:
-                o.edit_distance = 0.0
+                from pim.ai.tasks import edit_distance
+
+                o.edit_distance = edit_distance((o.proposed_value or {}).get("value"), final)
+            o.status = "edited" if o.edit_distance else "accepted"
         else:
             o.status, o.rejection_reason = "rejected", (comment or "rejected in approvals")[:500]
         o.decided_by, o.decided_at = user.email, utcnow()

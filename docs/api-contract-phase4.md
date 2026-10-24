@@ -81,7 +81,7 @@ interface QualityScore { entity_id: string; channel_code: string; grade: "A"|"B"
 | GET | `/api/ai/outputs?entity_id=&run_id=&status=&page=` | `{rows: AiOutput[], total}` |
 | POST | `/api/ai/outputs/{id}/accept` | body `{value?: unknown}` (when given, edited then accepted; keeps ai_generated) → AiOutput; approve right on the group, else the draft stays proposed and the output records `edited` with the new draft value |
 | POST | `/api/ai/outputs/{id}/reject` | body `{reason: string}` → AiOutput |
-| POST | `/api/ai/outputs/{id}/regenerate` | body `{note?: string}` → new AiOutput (the old one is rejected with reason "regenerated") |
+| POST | `/api/ai/outputs/{id}/regenerate` | body `{note?: string}` → new AiOutput (plus `outputs: AiOutput[]` when the template writes several attributes); the old one is rejected with reason "regenerated" |
 
 ### Bulk AI (AI-04)
 

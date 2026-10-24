@@ -289,26 +289,35 @@ def list_outputs(entity_id: str | None = None, run_id: str | None = None, status
         q = q.where(AiOutput.status == status)
     if template_code:
         q = q.where(AiOutput.template_code == template_code)
-    rows = session.execute(q.order_by(AiOutput.created_at.desc()).limit(5000)).scalars().all()
-    # RBAC: brand scope on the product and view rights on the attribute's group, like the grid and the approvals queue
-    ents = {e.id: e for e in session.execute(select(ProductEntity).where(ProductEntity.id.in_({o.entity_id for o in rows}))).scalars()} if rows else {}
-    visible = [o for o in rows if (e := ents.get(o.entity_id)) is not None and user.in_brand_scope(e.brand_scopes or [])
-               and (o.attribute_code not in meta.attributes or user.can_view_group(meta.attributes[o.attribute_code].group_code))]
-    page_rows = visible[(page - 1) * page_size: page * page_size]
-    return {"rows": _outs(session, page_rows), "total": len(visible)}
+    # RBAC in SQL, like the grid: view rights on the attribute's group, brand scope on the product
+    from sqlalchemy import String, cast, or_
+
+    hidden = [a.code for a in meta.attributes.values() if not user.can_view_group(a.group_code)]
+    if hidden:
+        q = q.where(AiOutput.attribute_code.notin_(hidden))
+    q = q.join(ProductEntity, ProductEntity.id == AiOutput.entity_id)
+    if user.brand_scopes:
+        q = q.where(or_(*[cast(ProductEntity.brand_scopes, String).like(f'%"{sc}"%') for sc in user.brand_scopes]))
+    total = session.execute(select(func.count()).select_from(q.subquery())).scalar_one()
+    rows = session.execute(q.order_by(AiOutput.created_at.desc()).offset((page - 1) * page_size).limit(page_size)).scalars().all()
+    return {"rows": _outs(session, rows), "total": total}
 
 
-def _output(session: Session, output_id: str) -> AiOutput:
+def _output(session: Session, output_id: str, user: CurrentUser | None = None) -> AiOutput:
     o = session.get(AiOutput, output_id)
     if o is None:
         raise HTTPException(404, "Output not found")
+    if user is not None:
+        ent = session.get(ProductEntity, o.entity_id)
+        if ent is None or not user.in_brand_scope(ent.brand_scopes or []):
+            raise HTTPException(404, "Output not found")  # RBAC-04: outside the user's brand scope reads as absent
     return o
 
 
 @router.post("/ai/outputs/{output_id}/accept")
 def accept(output_id: str, body: AcceptBody | None = None, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
            user: CurrentUser = Depends(get_current_user)) -> dict:
-    o = _output(session, output_id)
+    o = _output(session, output_id, user)
     attr = meta.attributes.get(o.attribute_code)
     if attr is None or not user.can_edit_group(attr.group_code):
         raise HTTPException(403, "No edit rights on this attribute's group")
@@ -326,7 +335,7 @@ def accept(output_id: str, body: AcceptBody | None = None, session: Session = De
 @router.post("/ai/outputs/{output_id}/reject")
 def reject(output_id: str, body: RejectBody, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
            user: CurrentUser = Depends(get_current_user)) -> dict:
-    o = _output(session, output_id)
+    o = _output(session, output_id, user)
     attr = meta.attributes.get(o.attribute_code)
     if attr is not None and not user.can_edit_group(attr.group_code):
         raise HTTPException(403, "No edit rights on this attribute's group")
@@ -344,11 +353,14 @@ def reject(output_id: str, body: RejectBody, session: Session = Depends(get_sess
 def regenerate(output_id: str, body: RegenerateBody | None = None, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
                user: CurrentUser = Depends(get_current_user)) -> dict:
     _run_ai(user)
-    o = _output(session, output_id)
+    o = _output(session, output_id, user)
     t = session.get(PromptTemplate, o.template_code)
     ent = session.get(ProductEntity, o.entity_id)
     if t is None or ent is None:
         raise HTTPException(404, "Template or product no longer exists")
+    attr = meta.attributes.get(o.attribute_code)
+    if attr is not None and t.task_type != "check" and not user.can_edit_group(attr.group_code):
+        raise HTTPException(403, "No edit rights on this attribute's group")
     if o.status in ("proposed", "edited", "needs_input", "failed", "info"):
         try:
             tasks.reject_output(session, user, o, "regenerated")
@@ -363,7 +375,8 @@ def regenerate(output_id: str, body: RegenerateBody | None = None, session: Sess
     except NotConfigured as exc:
         raise HTTPException(409, f"AI endpoint not configured: {exc}") from exc
     session.commit()
-    return {"outputs": _outs(session, outs), "note": body.note if body else None}
+    rendered = _outs(session, outs)
+    return {**rendered[0], "outputs": rendered, "note": body.note if body else None}
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -382,9 +395,15 @@ def create_run(body: AiRunBody, session: Session = Depends(get_session), meta: M
     level = meta.attributes[targets[0]].level if targets and targets[0] in meta.attributes else "style_color"
     sel.setdefault("level", level)
     ents = resolve_entities(session, meta, user, sel)
-    if not ents and sel.get("level") != "style_color":
-        sel["level"] = "style_color"
-        ents = resolve_entities(session, meta, user, sel)
+    if not ents and sel.get("level") != "style_color" and (sel.get("entity_ids") or sel.get("view_id")):
+        # A style-level template run from a style-color selection: one run per owning style, never per color.
+        picked = resolve_entities(session, meta, user, {**sel, "level": "style_color"})
+        owners: dict[str, ProductEntity] = {}
+        for e in picked:
+            o = tasks._owner_for(session, e, meta.attributes[targets[0]]) if targets and targets[0] in meta.attributes else None
+            if o is not None:
+                owners[o.id] = o
+        ents = list(owners.values())
     if not ents:
         raise HTTPException(400, "The selection resolves to no products at the template's level")
     for code in targets:

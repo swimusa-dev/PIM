@@ -256,8 +256,14 @@ def refresh_quality(session: Session, meta: Metadata, entities: list[ProductEnti
     links: dict[str, list[AssetLink]] = defaultdict(list)
     for lk in session.execute(select(AssetLink).options(selectinload(AssetLink.asset)).where(AssetLink.entity_id.in_(ids), AssetLink.status == "confirmed")).scalars():
         links[lk.entity_id].append(lk)
+    carried: dict[tuple[str, str], dict] = {}
     if dup_index is None and "duplicate_copy" in cfg["enabled_checks"]:
-        dup_index = duplicate_counts_for(session, meta, values, excluded=set(cfg["excluded_groups"]))
+        # Incremental refresh (every value write): the catalog-wide duplicate scan is the nightly job's work, so the
+        # previous snapshot's duplicate result is carried over and the check is marked as such.
+        for snap in session.execute(select(QualitySnapshot).where(QualitySnapshot.entity_id.in_(ids))).scalars():
+            prev = next((c for c in (snap.checks or []) if c.get("code") == "duplicate_copy"), None)
+            if prev:
+                carried[(snap.entity_id, snap.channel_code)] = prev
     session.execute(delete(QualitySnapshot).where(QualitySnapshot.entity_id.in_(ids)))
     now = utcnow()
     for t in targets.values():
@@ -265,6 +271,12 @@ def refresh_quality(session: Session, meta: Metadata, entities: list[ProductEnti
         merged = dict(values.get(style.id, {}) if style else {})
         merged.update(values.get(t.id, {}))
         for chan, r in compute_scores(session, meta, t, style, merged, links.get(t.id, []), blocked, dup_index, cfg).items():
+            prev = carried.get((t.id, chan))
+            if prev is not None and dup_index is None:
+                r["checks"].append({**prev, "details": list(prev.get("details", [])), "carried": True})
+                total_w = sum(float(c["weight"]) for c in r["checks"]) or 1.0
+                r["score"] = int(round(100 * sum(float(c["weight"]) for c in r["checks"] if c["passed"]) / total_w))
+                r["grade"] = grade_for(r["score"], cfg["grade_bands"])
             session.add(QualitySnapshot(entity_id=t.id, channel_code=chan, grade=r["grade"], score=r["score"], checks=r["checks"], computed_at=now))
     session.flush()
     return len(targets)

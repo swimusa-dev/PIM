@@ -229,7 +229,15 @@ def _run_ai_for(session: Session, meta: Metadata, user: CurrentUser, ent: Produc
     if any(o.status == "proposed" for o in outs):
         return "changed", "AI suggestion queued for approval"
     first = outs[0] if outs else None
-    return "failed", "; ".join((first.grounding_errors or []) + [f"needs input: {', '.join(first.needs_input)}"] if first and first.needs_input else (first.grounding_errors if first else ["no output"]))
+    if first is None:
+        return "failed", "no output"
+    if first.status == "info":
+        findings = first.check_findings or []
+        return "skipped", (f"{len(findings)} finding(s): " + "; ".join(f.get("message", "") for f in findings[:3])) if findings else "; ".join(first.grounding_errors or ["nothing to apply"])
+    parts = list(first.grounding_errors or [])
+    if first.needs_input:
+        parts.append(f"needs input: {', '.join(first.needs_input)}")
+    return "failed", "; ".join(parts) or first.status
 
 
 def rollback(session: Session, meta: Metadata, user: CurrentUser, action: BulkAction) -> dict:

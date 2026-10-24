@@ -22,7 +22,8 @@ def main() -> None:
         if run is None:
             raise SystemExit(f"run {a.run_id} not found")
         meta = load_metadata(s, force=True)
-        user = tasks.user_for_job(s, a.user or run.created_by)
+        rep = run.report or {}
+        user = tasks.user_for_job(s, a.user or run.created_by, roles=rep.get("requester_roles"), scopes=rep.get("requester_scopes"))
         tasks.continue_bulk(s, meta, user, run)
         mark_job_run(s, "succeeded" if run.status == "completed" else run.status, tasks.run_out(run))
 

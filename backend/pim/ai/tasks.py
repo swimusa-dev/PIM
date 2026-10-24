@@ -48,6 +48,7 @@ log = logging.getLogger(__name__)
 
 TASK_TYPES = ("generate", "adapt", "extract", "classify", "check", "restructure", "expand")
 STRUCTURED = ("extract", "classify", "check", "restructure")
+HOUSEKEEPING_REASONS = ("regenerated", "superseded")  # not a person's verdict on the template (AI-07)
 CORE = ("style_number", "color_code", "size", "sku", "upc", "label", "family_code", "lifecycle_status")
 
 
@@ -544,17 +545,20 @@ def accept_output(session: Session, meta: Metadata, user: CurrentUser, o: AiOutp
         except ValueError_ as exc:
             raise AiTaskError(str(exc)) from exc
         draft.proposed = {"value": value, "not_applicable": False}
+    if not user.can_approve_group(attr.group_code):
+        # Edit but no approve rights: the edit rides the draft into the approval queue (DM-08); nothing is decided
+        # yet, so the output stays proposed and metrics wait for the approver (AI-07).
+        if value is not None:
+            o.inputs = {**(o.inputs or {}), "edited_value": value}
+        return o
     o.final_value = {"value": final}
     o.edit_distance = edit_distance(o.proposed_value.get("value"), final)
     o.decided_by, o.decided_at = user.email, utcnow()
-    if user.can_approve_group(attr.group_code):
-        res = decide_drafts(session, meta, user, [draft.id], "approve", "accepted from Ask AI")
-        if res and res[0].outcome in ("approved", "unchanged"):
-            o.status = "edited" if value is not None and o.edit_distance else "accepted"
-        else:
-            raise AiTaskError(res[0].message if res else "Approval failed")
+    res = decide_drafts(session, meta, user, [draft.id], "approve", "accepted from Ask AI")
+    if res and res[0].outcome in ("approved", "unchanged"):
+        o.status = "edited" if value is not None and o.edit_distance else "accepted"
     else:
-        o.status = "edited" if value is not None else "proposed"  # stays in the approval queue (DM-08)
+        raise AiTaskError(res[0].message if res else "Approval failed")
     return o
 
 
@@ -577,11 +581,13 @@ def metrics(session: Session, template_code: str | None = None) -> list[dict]:
     groups: dict[tuple, list[AiOutput]] = {}
     for o in rows:
         key = (o.template_code, o.template_version if template_code else None)
+        if o.status == "rejected" and o.rejection_reason in HOUSEKEEPING_REASONS:
+            continue
         groups.setdefault(key, []).append(o)
     out = []
     for (code, ver), items in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         acc = [o for o in items if o.status in ("accepted", "edited")]
-        rej = [o for o in items if o.status == "rejected" and o.rejection_reason != "regenerated"]
+        rej = [o for o in items if o.status == "rejected" and o.rejection_reason not in HOUSEKEEPING_REASONS]
         decided = len(acc) + len(rej)
         dists = [o.edit_distance for o in acc if o.edit_distance is not None]
         reasons: dict[str, int] = {}
@@ -607,7 +613,8 @@ def start_bulk(session: Session, meta: Metadata, user: CurrentUser, tpl: Templat
                selection: dict, channel_code: str = "", service: AIService | None = None) -> tuple[AiRun, list[AiOutput]]:
     run = AiRun(kind="bulk", template_code=tpl.code, template_version=tpl.version, task_type=tpl.task_type, channel_code=channel_code or "",
                 selection=selection, entity_ids=[e.id for e in entities], sample_entity_ids=[e.id for e in entities[:SAMPLE_SIZE]],
-                status="sample_pending", total=len(entities), created_by=user.email)
+                status="sample_pending", total=len(entities), created_by=user.email,
+                report={"requester_roles": list(user.roles), "requester_scopes": list(user.brand_scopes or [])})
     session.add(run)
     session.flush()
     outputs: list[AiOutput] = []
@@ -637,6 +644,10 @@ def continue_bulk(session: Session, meta: Metadata, user: CurrentUser, run: AiRu
     tpl = session.get(TemplateRow, run.template_code)
     if tpl is None:
         run.status, run.error = "failed", "Template no longer exists"
+        return run
+    if not user.roles or not user.can("run_ai"):
+        run.status, run.error, run.finished_at = "failed", f"{user.email} has no role with run_ai; the run cannot continue", utcnow()
+        session.commit()
         return run
     run.status = "running"
     session.commit()
@@ -685,15 +696,18 @@ def accept_all(session: Session, meta: Metadata, user: CurrentUser, run: AiRun) 
     return {"accepted": accepted, "skipped": skipped}
 
 
-def user_for_job(session: Session, email: str) -> CurrentUser:
-    """The job runs as the person who started the run, with their roles and brand scopes (RBAC-01, RBAC-04)."""
+def user_for_job(session: Session, email: str, roles: list[str] | None = None, scopes: list[str] | None = None) -> CurrentUser:
+    """The job runs as the person who started the run (RBAC-01, RBAC-04): the roles and brand scopes recorded on the
+    run at request time win (they may come from Databricks groups), the user_role table is the fallback, and a user
+    without any role gets no rights, never admin."""
     from pim.auth.identity import build_user
     from pim.models import UserRole
 
-    rows = session.execute(select(UserRole).where(UserRole.email == email.lower())).scalars().all()
-    roles = [r.role_code for r in rows] or ["pim_admin"]
-    scopes = sorted({sc for r in rows for sc in (r.brand_scopes or [])})
-    return build_user(email, None, roles, scopes, session)
+    if not roles:
+        rows = session.execute(select(UserRole).where(UserRole.email == email.lower())).scalars().all()
+        roles = [r.role_code for r in rows]
+        scopes = sorted({sc for r in rows for sc in (r.brand_scopes or [])}) if scopes is None else scopes
+    return build_user(email, None, list(roles or []), list(scopes or []), session)
 
 
 def output_out(o: AiOutput, label: str) -> dict:

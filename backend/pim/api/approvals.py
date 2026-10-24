@@ -27,7 +27,12 @@ def queue(group: str | None = None, run_id: str | None = None, session: Session 
     ents = {e.id: e for e in session.execute(select(ProductEntity).where(ProductEntity.id.in_({d.entity_id for d in drafts}))).scalars()} if drafts else {}
     run_ids = {d.ai_run_id for d in drafts if d.ai_run_id}
     runs = {r.id: r for r in session.execute(select(AiRun).where(AiRun.id.in_(run_ids))).scalars()} if run_ids else {}
-    out_by_draft = {o.draft_id: o.id for o in session.execute(select(AiOutput).where(AiOutput.draft_id.in_([d.id for d in drafts]))).scalars()} if drafts else {}
+    out_by_draft: dict[str, str] = {}
+    if drafts:
+        # the live suggestion wins over superseded ones that still point at the same draft
+        for o in session.execute(select(AiOutput).where(AiOutput.draft_id.in_([d.id for d in drafts])).order_by(AiOutput.created_at)).scalars():
+            if o.status in ("proposed", "edited") or o.draft_id not in out_by_draft:
+                out_by_draft[o.draft_id] = o.id
     run_counts: dict[str, int] = {}
     for d in drafts:
         attr = meta.attributes.get(d.attribute_code)

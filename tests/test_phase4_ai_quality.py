@@ -357,8 +357,7 @@ def test_gov03_quality_score_checks_settings_grid_and_dashboard(client, session,
     session.flush()
     session.add(AssetLink(asset_id=small.id, entity_id=fvp.id, shot_type="back", status="confirmed"))
     session.flush()
-    quality.refresh_quality(session, meta, [fvp, ecb, other])
-    session.commit()
+    quality.recompute_all(session, meta)  # the full recompute owns duplicate detection; writes carry its result
     scores = {s.channel_code: s for s in quality.scores_for(session, [fvp.id])[fvp.id].values()}
     overall = scores[""]
     failed = {c["code"] for c in overall.checks if not c["passed"]}
@@ -494,7 +493,7 @@ def test_review_bulk_job_user_carries_roles(session, meta, admin, ingested):
     session.flush()
     u = tasks.user_for_job(session, "runner@swimusa.com")
     assert u.roles == ["ecommerce"] and u.can("run_ai") and u.brand_scopes == ["vitamin_a"]
-    assert tasks.user_for_job(session, "nobody@swimusa.com").roles == ["pim_admin"]
+    assert tasks.user_for_job(session, "nobody@swimusa.com").roles == []  # never admin by default
 
 
 def test_review_quality_refresh_failure_does_not_poison_the_write(session, meta, admin, ingested, monkeypatch):
@@ -511,3 +510,133 @@ def test_review_quality_refresh_failure_does_not_poison_the_write(session, meta,
     session.commit()  # no PendingRollbackError
     pv = session.execute(select(ProductValue).where(ProductValue.entity_id == fvp.id, ProductValue.attribute_code == "product_title")).scalar_one()
     assert pv.value_text == "Survives"
+
+
+# ---------------------------------------------------------------------------------------------------
+# PR #4 review fixes
+# ---------------------------------------------------------------------------------------------------
+def test_review2_regenerate_returns_one_output_and_scope_guards_decisions(client, session, meta, admin):
+    fvp = _sc(session)
+    _prep(session, meta, admin, fvp)
+    session.commit()
+    FakeClient.handler = staticmethod(lambda p: "Regen Title | Vitamin A")
+    out = client.post("/api/ai/ask", json={"entity_id": fvp.id, "template_code": "vita_seo_title"}, headers=ADMIN).json()["outputs"][0]
+    rg = client.post(f"/api/ai/outputs/{out['id']}/regenerate", json={"note": "again"}, headers=ADMIN).json()
+    assert rg["id"] and rg["status"] == "proposed" and rg["attribute_code"] == "seo_title" and len(rg["outputs"]) == 1  # AiOutput shape
+    session.add(UserRole(email="other@swimusa.com", role_code="pim_admin", brand_scopes=["ralph_lauren_swim"]))
+    session.commit()
+    other = {"X-Forwarded-Email": "other@swimusa.com", "X-Forwarded-User": "u9"}
+    assert client.post(f"/api/ai/outputs/{rg['id']}/accept", headers=other).status_code == 404  # outside the brand scope
+    assert client.post(f"/api/ai/outputs/{rg['id']}/reject", json={"reason": "x"}, headers=other).status_code == 404
+    assert client.post(f"/api/ai/outputs/{rg['id']}/regenerate", headers=other).status_code == 404
+    assert session.get(AiOutput, rg["id"]).status == "proposed"
+
+
+def test_review2_approvals_points_at_live_output_and_metrics_ignore_housekeeping(client, session, meta, admin):
+    fvp = _sc(session)
+    _prep(session, meta, admin, fvp)
+    session.commit()
+    FakeClient.handler = staticmethod(lambda p: "First | Vitamin A")
+    o1 = client.post("/api/ai/ask", json={"entity_id": fvp.id, "template_code": "vita_seo_title"}, headers=ADMIN).json()["outputs"][0]
+    FakeClient.handler = staticmethod(lambda p: "Second | Vitamin A")
+    o2 = client.post("/api/ai/ask", json={"entity_id": fvp.id, "template_code": "vita_seo_title"}, headers=ADMIN).json()["outputs"][0]
+    assert o1["draft_id"] == o2["draft_id"]
+    items = [i for g in client.get("/api/approvals", headers=ADMIN).json()["groups"] for i in g["items"] if i["attribute_code"] == "seo_title"]
+    assert items and items[0]["ai_output_id"] == o2["id"]
+    client.post(f"/api/ai/outputs/{o2['id']}/accept", headers=ADMIN)
+    m = client.get("/api/ai/metrics?template_code=vita_seo_title", headers=VIEWER).json()[0]
+    assert m["outputs"] == 1 and m["accepted"] == 1 and m["rejected"] == 0 and m["acceptance_rate"] == 1.0  # superseded never counts
+
+
+def test_review2_non_approver_accept_stays_pending_until_decided(session, meta, admin, ingested):
+    from tests.conftest import make_user
+
+    fvp = _sc(session)
+    _prep(session, meta, admin, fvp)
+    FakeClient.handler = staticmethod(lambda p: "Festival Rose")
+    out = tasks.run_task(session, meta, admin, fvp, session.get(PromptTemplate, "expand_color_name"))[0]
+    from pim.models import Role
+
+    session.add(Role(code="tmp_editor", label="Temp editor", permissions=["run_ai"], data_rights={"*": "edit"}))
+    session.flush()
+    merch = make_user(session, "editor@swimusa.com", ["tmp_editor"])
+    assert merch.can_edit_group("style_details") and not merch.can_approve_group("style_details")
+    tasks.accept_output(session, meta, merch, out, value="Festival Rosé")
+    assert out.status == "proposed" and out.decided_by is None and out.final_value is None and out.inputs["edited_value"] == "Festival Rosé"
+    draft = session.get(ValueDraft, out.draft_id)
+    assert draft.state == "proposed" and draft.proposed["value"] == "Festival Rosé"
+    assert tasks.metrics(session, "expand_color_name")[0]["pending"] == 1
+    from pim.services.values import decide_drafts
+
+    decide_drafts(session, meta, admin, [draft.id], "approve")
+    assert out.status == "edited" and out.edit_distance and out.decided_by == admin.email and out.final_value == {"value": "Festival Rosé"}
+    session.rollback()
+    session.execute(select(Role).where(Role.code == "tmp_editor"))
+    tmp = session.get(Role, "tmp_editor")
+    if tmp is not None:
+        session.delete(tmp)
+        session.commit()
+
+
+def test_review2_job_identity_never_defaults_to_admin(session, meta, admin, ingested):
+    u = tasks.user_for_job(session, "ghost@swimusa.com")
+    assert u.roles == [] and not u.can("run_ai")
+    u2 = tasks.user_for_job(session, "ghost@swimusa.com", roles=["ecommerce"], scopes=["vitamin_a"])
+    assert u2.roles == ["ecommerce"] and u2.can("run_ai") and u2.brand_scopes == ["vitamin_a"]
+    from pim.models import AiRun
+
+    run = AiRun(template_code="vita_seo_title", template_version=1, task_type="generate", entity_ids=[], sample_entity_ids=[],
+                status="sample_approved", created_by="ghost@swimusa.com")
+    session.add(run)
+    session.flush()
+    tasks.continue_bulk(session, meta, u, run)
+    assert run.status == "failed" and "run_ai" in run.error
+
+
+def test_review2_style_level_bulk_runs_once_per_style(client, session, meta, admin):
+    FakeClient.handler = staticmethod(lambda p: "A style description in the brand voice with ribbed fabric.")
+    colors = session.execute(select(ProductEntity).where(ProductEntity.level == "style_color", ProductEntity.style_number == "200809")).scalars().all()
+    assert len(colors) == 2
+    r = client.post("/api/ai/runs", json={"template_code": "vita_product_description", "selection": {"entity_ids": [c.id for c in colors]}}, headers=ADMIN)
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 1 and len(FakeClient.calls) == 1  # the owning style, not one call per color
+
+
+def test_review2_bulk_action_check_template_reports_findings(session, meta, admin, ingested):
+    from pim.services.bulk import _run_ai_for
+
+    fvp = _sc(session)
+    _prep(session, meta, admin, fvp)
+    FakeClient.handler = staticmethod(lambda p: '{"findings": [{"kind": "tone", "message": "too salesy", "severity": "warning"}]}')
+    outcome, msg = _run_ai_for(session, meta, admin, fvp, {"template_code": "check_brand_voice"})
+    assert outcome == "skipped" and "too salesy" in msg
+
+
+def test_review2_outputs_listing_pages_in_sql_and_incremental_quality_carries_duplicates(client, session, meta, admin):
+    fvp = _sc(session)
+    _prep(session, meta, admin, fvp)
+    session.commit()
+    FakeClient.handler = staticmethod(lambda p: "Paged | Vitamin A")
+    for _ in range(3):
+        client.post("/api/ai/ask", json={"entity_id": fvp.id, "template_code": "vita_seo_title"}, headers=ADMIN)
+    page = client.get(f"/api/ai/outputs?entity_id={fvp.id}&page=2&page_size=2", headers=ADMIN).json()
+    assert page["total"] == 3 and len(page["rows"]) == 1
+    # duplicate copy: the full recompute finds it; a later incremental refresh carries the result instead of rescanning
+    other = _sc(session, "200810", "ECB")
+    dup = "<p>Identical copy on two different styles, long enough to count as duplicated content here.</p>"
+    set_value(session, meta, admin, session.get(ProductEntity, fvp.parent_id), meta.attributes["product_description"], dup)
+    set_value(session, meta, admin, session.get(ProductEntity, other.parent_id), meta.attributes["product_description"], dup)
+    session.commit()
+    quality.recompute_all(session, meta)
+    snap = quality.scores_for(session, [fvp.id])[fvp.id][""]
+    dup_check = next(c for c in snap.checks if c["code"] == "duplicate_copy")
+    assert dup_check["passed"] is False and not dup_check.get("carried")
+    set_value(session, meta, admin, fvp, meta.attributes["product_title"], "Touched again")
+    from pim.services.readiness import refresh_snapshots
+
+    refresh_snapshots(session, meta, [fvp])
+    session.commit()
+    snap2 = quality.scores_for(session, [fvp.id])[fvp.id][""]
+    session.refresh(snap2)
+    dup2 = next(c for c in snap2.checks if c["code"] == "duplicate_copy")
+    assert dup2["passed"] is False and dup2.get("carried") is True
