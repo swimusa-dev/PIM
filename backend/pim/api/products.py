@@ -206,19 +206,26 @@ def _images_for(session: Session, meta: Metadata, ent: ProductEntity) -> dict:
             for r in rs.requirements:
                 if r.shot_type and r.required:
                     required.setdefault(r.shot_type, []).append(ch.code)
-    out_links = [_link_out(lk) for lk in links]
-    confirmed = {lk.shot_type: _link_out(lk) for lk in links if lk.status == "confirmed" and lk.shot_type}
+    out_links = [_link_out(lk, meta, target.family_code) for lk in links]
+    confirmed = {lk.shot_type: next(o for o in out_links if o["id"] == lk.id) for lk in links if lk.status == "confirmed" and lk.shot_type}
     slots = [{"shot_type": st.code, "label": st.label, "required_by": required.get(st.code, []), "link": confirmed.get(st.code)}
              for st in sorted(meta.shot_types.values(), key=lambda s: s.sort_order)]
     return {"slots": slots, "candidates": [lk for lk in out_links if lk["status"] == "proposed"], "links": out_links}
 
 
-def _link_out(lk: AssetLink) -> dict:
+def _link_out(lk: AssetLink, meta: Metadata | None = None, family_code: str | None = None) -> dict:
     a = lk.asset
-    return {"id": lk.id, "asset_id": lk.asset_id, "entity_id": lk.entity_id, "shot_type": lk.shot_type, "tier": lk.tier,
-            "confidence": lk.confidence, "status": lk.status, "thumbnail_url": a.thumbnail_url if a else None,
-            "filename": a.filename if a else "", "width": a.width if a else None, "height": a.height if a else None,
-            "sort_order": lk.sort_order, "evidence": lk.evidence}
+    d = {"id": lk.id, "asset_id": lk.asset_id, "entity_id": lk.entity_id, "shot_type": lk.shot_type, "tier": lk.tier,
+         "confidence": lk.confidence, "status": lk.status, "thumbnail_url": a.thumbnail_url if a else None,
+         "filename": a.filename if a else "", "width": a.width if a else None, "height": a.height if a else None,
+         "sort_order": lk.sort_order, "evidence": lk.evidence or {},
+         "ai_generated_image": bool(a.ai_generated_image) if a else False,
+         "written_back_at": lk.written_back_at.isoformat() if lk.written_back_at else None, "rule_failures": {}}
+    if meta is not None and a is not None:
+        from pim.services.images_phase3 import rule_failures_for  # IMG-05 technical rules per channel
+
+        d["rule_failures"] = rule_failures_for(meta, a, family_code)
+    return d
 
 
 @router.get("/products/{entity_id}/images")
@@ -226,7 +233,9 @@ def product_images(entity_id: str, session: Session = Depends(get_session), meta
                    user: CurrentUser = Depends(get_current_user)) -> dict:
     ent = _entity_or_404(session, entity_id, user)
     d = _images_for(session, meta, ent)
-    return {"slots": d["slots"], "candidates": d["candidates"]}
+    fam = ent.family_code or (session.get(ProductEntity, ent.parent_id).family_code if ent.parent_id and session.get(ProductEntity, ent.parent_id) else None)
+    rules = {ch.code: rs.image_rules for ch in meta.channels.values() if (rs := meta.requirement_set_for(ch.code, fam)) and rs.image_rules}
+    return {"slots": d["slots"], "candidates": d["candidates"], "links": d["links"], "rules": rules}
 
 
 @router.post("/images/links/{link_id}/{decision}")
@@ -241,6 +250,11 @@ def decide_image_link(link_id: str, decision: str, body: LinkDecisionBody | None
     if not user.can_edit_group("channel_shopify") and not user.can("admin_metadata"):
         raise HTTPException(403, "Image assignment requires edit rights on the Shopify channel group")
     decide_link(session, lk, decision, user.email, body.shot_type if body else None)
+    written = False
+    if decision == "confirm":
+        from pim.services.images_phase3 import try_write_back  # IMG-06: best effort, never blocks
+
+        written = try_write_back(session, lk)
     refresh_snapshots(session, meta, [ent])
     session.commit()
-    return _link_out(lk)
+    return {**_link_out(lk, meta, ent.family_code), "written_back": written}

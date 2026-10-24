@@ -1669,3 +1669,49 @@ table.data.compact td {
 .grid-table td.row-selected {
   background: var(--teal-faint);
 }
+
+/* ---------- Phase 3: channel editor, exports, images ---------- */
+table.data tr.expanded td {
+  background: var(--teal-faint);
+}
+table.data tr.expanded-row > td {
+  background: var(--bg);
+  padding: 12px;
+}
+.channel-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.channel-editor .tabs {
+  margin-bottom: 0;
+}
+.panel.gaps-warn {
+  border-color: var(--amber);
+}
+.diff-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+.diff-list li {
+  margin: 2px 0;
+}
+.image-item {
+  align-items: center;
+}
+.image-item .renditions {
+  font-size: 12px;
+}
+.eligibility-row {
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+.eligibility-row:last-child {
+  border-bottom: none;
+}
+.reasons {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--text-muted);
+}

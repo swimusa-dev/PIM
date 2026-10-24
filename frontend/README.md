@@ -36,7 +36,8 @@ src/
   detail/     product detail pieces: tree, attribute form, images, history, comments, workflow panel, carryover
   imports/    import wizard steps: shared helpers, Upload, Map (with value mappings and templates), Validate, Match, Review
   workflows/  workflow item actions (advance, reject, assign) shared by My Work and the detail panel
-  admin/      admin tabs (including Rules)
+  admin/      admin tabs (including Rules); admin/channel/ holds the per-channel editor tabs (schema, mapping, image profile, schedule, health)
+  exports/    pieces shared by the Exports pages: status pills, Dry run / Publish dialog, delta preview
   pages/      one file per route, each headed with the requirement IDs it implements
   lib/        format, validation, tsv helpers
 ```
@@ -51,8 +52,11 @@ src/
 | `/reference/:type`, `/reference/:type/:id` | Reference entities | DM-11 |
 | `/approvals` | Approval queue | DM-08 |
 | `/packages`, `/packages/:id` | Shopify update packages | EXP-13 |
-| `/images` | Image review queues | IMG-05 |
+| `/exports` | Exports: channel picker, Dry run, Publish, Delta preview, publish history with channel and kind filters | EXP-04, EXP-05, EXP-06 |
+| `/exports/:id` | Publish detail: summary, payload preview, files, items with issues and errors, retailer feedback upload or adapter poll, package link | EXP-04, EXP-05, EXP-13 |
+| `/images` | Image review queues: candidates, missing shots, unparsed (with Ask AI for candidates), failing rules per channel | IMG-03, IMG-05 |
 | `/admin/:tab` | Metadata, roles, rules, reports, telemetry | 1.3, RBAC, IMP-11, GOV-01, GOV-04, GOV-07 |
+| `/admin/channels` | Channel list; each row expands into Target schema, Mapping, Image profile, Schedule and Health tabs | EXP-01, EXP-02, EXP-05, EXP-06, IMG-07 |
 | `/admin/rules` | Rules engine: list, editor, preview on samples, activate, run now, runs | GOV-01, GOV-06 |
 | `/imports` | Import history, mapping templates, import sources | IMP-07, IMP-02, IMP-01 |
 | `/imports/new`, `/imports/:id` | Import wizard: Upload, Map, Validate, Match, Review and Commit | IMP-01 to IMP-08, IMP-12 |
@@ -77,6 +81,43 @@ both likely forms or sends an extra optional field:
 - `POST /api/imports/templates` sends the template fields plus `batch_id` so the server can derive the structure signature.
 - Review diff entries for `creates`, `adds` and `skipped` are rendered from whatever keys they carry.
 - `GET /api/notifications` without `unread` is expected to return recent rows plus the `unread` count.
+
+## Phase 3 additions
+
+Built to `docs/api-contract-phase3.md`. The Phase 3 client lives in `src/api/client.ts` as `channelApi`, `publishApi`
+and `eligibilityApi` (plus `api.images.*` and `api.metadata.shotTypes`); the interfaces are appended to
+`src/api/types.ts`.
+
+- Admin > Channels: each row has a Configure button that expands the `ChannelEditor` (EXP-02 target schema with
+  refresh and diff, EXP-01 mapping with attribute picker, transforms, value-mappings summary and gaps, IMG-07 image
+  profile, EXP-06 schedule with Run now, EXP-05 health). Mapping and image profile share one draft saved with
+  `PUT /api/channels/{code}/mapping`; the editor is read only without the `edit_profile` channel right (`*` wildcard
+  applies, admins always pass).
+- Product detail: the Readiness detail panel ends with the Eligibility block (EXP-12): reasons per channel, and for
+  admins (`admin_metadata`) an Override eligibility dialog with a required reason and optional expiry, plus a Remove
+  action on existing overrides.
+- Product images panel: confirmed links in sort order with up / down reordering (`PUT /images/order`, the first is
+  Main), rule failure badges per channel, an AI generated toggle per asset, a Renditions expander with Create for
+  channel, and Ask AI for candidates on candidate assets (tier 3, 409 shown as "feature off").
+
+### Phase 3 contract assumptions
+
+- `GET /api/channels/{code}/mapping` is expected to echo `image_profile` (optional); when absent the editor falls back
+  to `channel.config.image_profile`, then to an empty profile.
+- `GET /api/metadata/shot-types` (present in the backend, not in the contracts) returns `{code, label, sort_order}[]`.
+- Package transport is detected from `channel.config.transport === "package"`, or from a Shopify adapter when the
+  key is absent; the publish result then links to `/packages/{summary.package_id}`.
+- `ChannelHealth.health_score` is rendered as a percent whether the backend sends 0..1 or 0..100.
+- The schedule form stores either `every_hours` or `at_hour` plus `at_minute`; the other is sent as `null`.
+- The `failing_rules` image queue rows are expected to be `ImageLink` rows; the product label is read from `label`
+  or `entity_label`, and the reasons from `rule_failures[channel]` (falling back to `reasons`).
+- `GET /api/products/{id}/images` confirmed links are read from the `slots` array (Phase 1 shape); `rules` is
+  rendered as key / value text per channel.
+- The payload preview switches to a table when every preview object is flat and the publish has a CSV or XLSX file;
+  JSON otherwise (a manual toggle is available).
+- `GET /api/publishes/{id}/items` paging assumes 100 rows per page for the Next button; the first page is taken from
+  the detail response's `items` until a status filter is set.
+- `GET /api/channels/{code}/schema/diff` may 404 before the first refresh; the error is ignored.
 
 ## Grid keyboard reference (DM-03)
 

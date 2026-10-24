@@ -1,0 +1,6 @@
+{"data": {"metafieldDefinitions": {"edges": [
+  {"node": {"namespace": "custom", "key": "short_description", "name": "Short description", "ownerType": "PRODUCT", "type": {"name": "multi_line_text_field"}, "validations": [{"name": "max", "value": "300"}]}},
+  {"node": {"namespace": "custom", "key": "fabric_story", "name": "Fabric story", "ownerType": "PRODUCT", "type": {"name": "rich_text_field"}, "validations": []}},
+  {"node": {"namespace": "custom", "key": "coverage", "name": "Coverage", "ownerType": "PRODUCT", "type": {"name": "single_line_text_field"}, "validations": [{"name": "choices", "value": "[\"Full\",\"Moderate\",\"Cheeky\"]"}]}},
+  {"node": {"namespace": "shopify--discovery--product_recommendation", "key": "complementary_products", "name": "Complementary", "ownerType": "PRODUCT", "type": {"name": "list.product_reference"}, "validations": []}}
+]}}, "api_version": "2026-07"}

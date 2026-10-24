@@ -82,3 +82,16 @@ export function rowsOf<T>(data: T[] | { rows: T[] } | undefined | null): T[] {
   if (!data) return [];
   return Array.isArray(data) ? data : (data.rows ?? []);
 }
+
+// ---- Phase 3 shared hooks ----
+export function useShotTypes() {
+  return useQuery({ queryKey: ["metadata", "shot-types"], queryFn: api.metadata.shotTypes, staleTime: METADATA_STALE });
+}
+
+/** Channel right from /api/me (RBAC-03). "*" is the wildcard entry for channels not listed explicitly. */
+export function channelRight(me: Me | undefined, channelCode: string, right: "run" | "edit_profile"): boolean {
+  if (!me) return false;
+  if (isAdmin(me)) return true;
+  const r = me.channel_rights?.[channelCode] ?? me.channel_rights?.["*"];
+  return !!r?.[right];
+}

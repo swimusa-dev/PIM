@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     style_master_table: str = "swim_data_whse.bluecherry.style_master"
     import_volume: str = "./local_data/imports"
     package_volume: str = "./local_data/packages"
+    publish_volume: str | None = None  # EXP-05 payloads and renditions; defaults to package_volume
     erp_stale_threshold_hours: int = 26
     mention_domain: str = "swimusa.com"  # DM-09: "@first.last" resolves to this domain
 
@@ -56,6 +57,8 @@ class Settings(BaseSettings):
     feature_shopify_direct_write: bool = Field(default=False)  # EXP-07, off until owner approves
     feature_lakebase_cdf: bool = False  # ARC-02 history feed via CDF (Preview) vs snapshot diff job
     feature_image_embeddings: bool = False  # IMG-04
+    feature_image_ai_match: bool = False  # IMG-03 tier 3, on once PLT-00 step 8 passes
+    feature_channel_send: bool = False  # EXP-05/06: actually call retailer adapters; off until credentials and tests exist
     ai_mapping_confidence_threshold: float = 0.70  # IMP-02
 
     @property

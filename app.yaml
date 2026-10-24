@@ -45,6 +45,17 @@ env:
     valueFrom: bulk-job
   - name: DATABRICKS_JOB_ID_RULES
     valueFrom: rules-job
+  - name: DATABRICKS_JOB_ID_CHANNEL_EXPORT
+    valueFrom: channel-export-job
+  - name: DATABRICKS_JOB_ID_RENDITIONS
+    valueFrom: renditions-job
+  - name: PIM_FEATURE_IMAGE_AI_MATCH
+    # IMG-03 tier 3 (Air semantic search plus vision model) stays off until PLT-00 step 8 passes.
+    value: "false"
+  - name: PIM_FEATURE_CHANNEL_SEND
+    # EXP-05: retailer API sends stay off until Phase 5 credentials and sandbox tests exist; publishes still
+    # validate, write the payload and (for Shopify) build the EXP-13 package.
+    value: "false"
   - name: PIM_FEATURE_SHOPIFY_DIRECT_WRITE
     # EXP-07 stays off until the owner approves direct writes (EXP-13 is the Phase 1 path).
     value: "false"

@@ -1,0 +1,5 @@
+Product ID,Status,Error Message,Field
+200809-FVP,Rejected,Product title exceeds maximum length,Product Title
+200809-FVP,Rejected,Internal server error at retailer; please retry later,
+200809-ECB,Accepted,,
+999999-XXX,Rejected,Unknown item,

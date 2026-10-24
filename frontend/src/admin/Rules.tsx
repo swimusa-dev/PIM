@@ -1,4 +1,4 @@
-// GOV-01 rules engine admin, GOV-06 suspicious constants. List with priority / trigger / level / status and
+// GOV-01 rules engine admin, GOV-06 suspicious constants (FieldSelect and COND_OPS are reused by the EXP-01 conditional transform editor). List with priority / trigger / level / status and
 // enabled toggle; editor with condition builder and actions; preview on samples; activate (forced with a
 // reason when the preview blocks it); run now; runs history.
 
@@ -19,7 +19,7 @@ const TRIGGERS: { v: RuleTrigger; label: string }[] = [
   { v: "nightly", label: "Nightly" },
   { v: "all", label: "All of the above" },
 ];
-const COND_OPS: { op: ConditionOp; label: string }[] = [
+export const COND_OPS: { op: ConditionOp; label: string }[] = [
   { op: "eq", label: "is" },
   { op: "neq", label: "is not" },
   { op: "contains", label: "contains" },
@@ -215,7 +215,7 @@ function useRuleFields(level: Level) {
   return { fields, targets, loading: attrs.isLoading || groups.isLoading, error: attrs.error ?? groups.error };
 }
 
-function FieldSelect({ fields, value, onChange, placeholder = "Choose a field" }: { fields: FieldDef[]; value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function FieldSelect({ fields, value, onChange, placeholder = "Choose a field" }: { fields: FieldDef[]; value: string; onChange: (v: string) => void; placeholder?: string }) {
   const grouped = useMemo(() => {
     const m = new Map<string, FieldDef[]>();
     for (const f of fields) m.set(f.groupLabel, [...(m.get(f.groupLabel) ?? []), f]);

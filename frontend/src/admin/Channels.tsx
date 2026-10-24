@@ -1,17 +1,21 @@
-// EXP-01, EXP-13: Channels. Label, enabled, protected fields list, requirement set. PUT /api/metadata/channels/{code}.
+// EXP-01, EXP-02, EXP-05, EXP-06, EXP-13, IMG-07: Channels. Label, enabled, protected fields list, requirement set
+// (PUT /api/metadata/channels/{code}); each row expands into the ChannelEditor (schema, mapping, image profile,
+// schedule, health).
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useChannels } from "../api/hooks";
 import type { Channel } from "../api/types";
 import { Badge, Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
+import { ChannelEditor } from "./ChannelEditor";
 
 export function ChannelsTab() {
   const channels = useChannels();
   const qc = useQueryClient();
   const toast = useToast();
   const [editing, setEditing] = useState<Channel | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: (c: Channel) => api.metadata.saveChannel(c.code, c),
@@ -59,8 +63,13 @@ export function ChannelsTab() {
             </thead>
             <tbody>
               {channels.data!.map((c) => (
-                <tr key={c.code}>
-                  <td className="mono">{c.code}</td>
+                <Fragment key={c.code}>
+                <tr className={expanded === c.code ? "expanded" : ""}>
+                  <td className="mono">
+                    <button className="link" onClick={() => setExpanded(expanded === c.code ? null : c.code)} title="Open the schema, mapping, image profile, schedule and health tabs">
+                      {expanded === c.code ? "v" : ">"} {c.code}
+                    </button>
+                  </td>
                   <td>{c.label}</td>
                   <td>{c.kind}</td>
                   <td className="mono">{c.adapter}</td>
@@ -77,12 +86,23 @@ export function ChannelsTab() {
                     </div>
                   </td>
                   <td className="num">{c.version}</td>
-                  <td>
+                  <td className="nowrap">
+                    <button className="small" onClick={() => setExpanded(expanded === c.code ? null : c.code)}>
+                      {expanded === c.code ? "Close" : "Configure"}
+                    </button>{" "}
                     <button className="small" onClick={() => setEditing(c)}>
                       Edit
                     </button>
                   </td>
                 </tr>
+                {expanded === c.code && (
+                  <tr className="expanded-row">
+                    <td colSpan={9}>
+                      <ChannelEditor channel={c} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -16,7 +16,8 @@ log = logging.getLogger(__name__)
 
 JOB_ENV = {"ingest": "DATABRICKS_JOB_ID_INGEST", "air_poll": "DATABRICKS_JOB_ID_AIR_POLL",
            "package": "DATABRICKS_JOB_ID_PACKAGE", "history": "DATABRICKS_JOB_ID_HISTORY",
-           "import_commit": "DATABRICKS_JOB_ID_IMPORT_COMMIT", "bulk": "DATABRICKS_JOB_ID_BULK", "rules": "DATABRICKS_JOB_ID_RULES"}
+           "import_commit": "DATABRICKS_JOB_ID_IMPORT_COMMIT", "bulk": "DATABRICKS_JOB_ID_BULK", "rules": "DATABRICKS_JOB_ID_RULES",
+           "channel_export": "DATABRICKS_JOB_ID_CHANNEL_EXPORT", "renditions": "DATABRICKS_JOB_ID_RENDITIONS"}
 
 
 def trigger_job(session: Session, kind: str, requested_by: str, params: dict) -> JobRun:
@@ -37,7 +38,7 @@ def trigger_job(session: Session, kind: str, requested_by: str, params: dict) ->
         threading.Thread(target=_inline_ingest, args=(run.id,), daemon=True).start()
         run.status = "running"
         run.started_at = utcnow()
-    elif kind in ("import_commit", "bulk", "rules"):
+    elif kind in ("import_commit", "bulk", "rules", "channel_export", "renditions"):
         # Locally (no job bound) the work runs inline in the request thread after commit; see the API layer.
         run.status = "running"
         run.started_at = utcnow()

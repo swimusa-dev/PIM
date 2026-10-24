@@ -132,3 +132,45 @@ class ReferenceBody(BaseModel):
     label: str | None = None
     values: dict[str, Any] = {}
     certificate_refs: list[str] | None = None
+
+
+# ---- Phase 3 (EXP-01, EXP-04, EXP-05, EXP-06, EXP-12, IMG-05, IMG-06, IMG-07) ----
+class MappingBody(BaseModel):
+    attribute_mapping: dict[str, str] = {}
+    transforms: list[dict] = []
+    image_profile: dict | None = None
+
+
+class RunBody(BaseModel):
+    selection: dict = {}
+    mode: str = "full"  # delta | full
+    preview: int = 5
+
+
+class ScheduleBody(BaseModel):
+    enabled: bool = False
+    mode: str = "delta"
+    every_hours: float | None = None
+    at_hour: int | None = None
+    at_minute: int = 0
+    timezone: str = "America/New_York"
+    view_id: str | None = None
+
+
+class EligibilityOverrideBody(BaseModel):
+    channel_code: str
+    reason: str
+    expires_at: str | None = None
+
+
+class ImageOrderBody(BaseModel):
+    link_ids: list[str]
+
+
+class AssetPatchBody(BaseModel):
+    ai_generated_image: bool
+
+
+class RenditionRefreshBody(BaseModel):
+    channel_code: str
+    entity_ids: list[str] | None = None

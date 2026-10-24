@@ -1,4 +1,5 @@
-// Typed fetch helpers for every endpoint in docs/api-contract.md and docs/api-contract-phase2.md.
+// Typed fetch helpers for every endpoint in docs/api-contract.md, docs/api-contract-phase2.md and
+// docs/api-contract-phase3.md.
 // All calls go through `request` so errors surface the server's `{detail}` message.
 
 import type {
@@ -67,6 +68,25 @@ import type {
   Worksheet,
   WorksheetCreate,
   WorksheetCreated,
+  ChannelDelta,
+  ChannelHealth,
+  ChannelMapping,
+  ChannelMappingUpdate,
+  Eligibility,
+  EligibilityOverride,
+  ExportSchedule,
+  FeedbackResult,
+  ImageLink,
+  Publish,
+  PublishDetail,
+  PublishItemList,
+  PublishList,
+  PublishRequest,
+  Rendition,
+  RunNowResult,
+  SchemaDiff,
+  ShotType,
+  TargetSchema,
 } from "./types";
 
 export class ApiError extends Error {
@@ -139,6 +159,7 @@ export const api = {
     channels: () => get<Channel[]>("/api/metadata/channels"),
     saveChannel: (code: string, body: Channel) => put<Channel>(`/api/metadata/channels/${encodeURIComponent(code)}`, body),
     referenceTypes: () => get<ReferenceType[]>("/api/metadata/reference-types"),
+    shotTypes: () => get<ShotType[]>("/api/metadata/shot-types"),
   },
 
   // ---- Reference entities (DM-11) ----
@@ -222,15 +243,27 @@ export const api = {
     reconcile: (id: string) => post<PackageDetail>(`/api/packages/${encodeURIComponent(id)}/reconcile`),
   },
 
-  // ---- Images (IMG-05) ----
+  // ---- Images (IMG-03, IMG-05, IMG-06, IMG-07) ----
   images: {
     queue: (kind: ImageQueueKind, channel?: string) => get<ImageQueue>(`/api/images/queue${qs({ kind, channel })}`),
+    // Phase 3: confirm also reports `written_back` (Air write-back, IMG-06).
     confirm: (linkId: string, shotType?: string) =>
-      post<{ ok?: boolean; [k: string]: unknown }>(`/api/images/links/${encodeURIComponent(linkId)}/confirm`, {
+      post<{ ok?: boolean; written_back?: boolean; [k: string]: unknown }>(`/api/images/links/${encodeURIComponent(linkId)}/confirm`, {
         shot_type: shotType,
       }),
     reject: (linkId: string) =>
       post<{ ok?: boolean; [k: string]: unknown }>(`/api/images/links/${encodeURIComponent(linkId)}/reject`, {}),
+    setOrder: (entityId: string, linkIds: string[]) =>
+      put<{ ok?: boolean; [k: string]: unknown }>(`/api/products/${encodeURIComponent(entityId)}/images/order`, { link_ids: linkIds }),
+    updateAsset: (assetId: string, body: { ai_generated_image: boolean }) =>
+      put<{ ok?: boolean; [k: string]: unknown }>(`/api/images/assets/${encodeURIComponent(assetId)}`, body),
+    // 409 when PIM_FEATURE_IMAGE_AI_MATCH is off (callers check ApiError.status).
+    aiCandidates: (assetId: string) =>
+      post<{ candidates: ImageLink[] }>(`/api/images/assets/${encodeURIComponent(assetId)}/ai-candidates`),
+    renditions: (assetId: string, channel?: string) =>
+      get<Rendition[]>(`/api/images/assets/${encodeURIComponent(assetId)}/renditions${qs({ channel })}`),
+    refreshRenditions: (channelCode: string, entityIds?: string[]) =>
+      post<{ created: number; queued: number }>("/api/images/renditions/refresh", { channel_code: channelCode, entity_ids: entityIds }),
   },
 
   // ---- Admin ----
@@ -404,6 +437,55 @@ export const api = {
     run: (id: string) => post<{ affected: number; report: Record<string, unknown> }>(`/api/rules/${encodeURIComponent(id)}/run`),
     runs: (ruleId?: string) => get<RuleRun[] | { rows: RuleRun[]; total?: number }>(`/api/rules/runs${qs({ rule_id: ruleId })}`),
   },
+};
+
+// =================================================================================
+// Phase 3
+// =================================================================================
+
+// ---- Target schemas, mappings, dry runs, publishes, health, delta, schedule (EXP-01, EXP-02, EXP-04, EXP-05, EXP-06) ----
+export const channelApi = {
+  schema: (code: string) => get<TargetSchema>(`/api/channels/${encodeURIComponent(code)}/schema`),
+  refreshSchema: (code: string, file?: File | null, productType?: string) => {
+    const fd = new FormData();
+    if (file) fd.append("file", file);
+    return request<{ schema: TargetSchema; diff: SchemaDiff }>(
+      `/api/channels/${encodeURIComponent(code)}/schema/refresh${qs({ product_type: productType })}`,
+      { method: "POST", body: fd },
+    );
+  },
+  schemaDiff: (code: string) => get<SchemaDiff>(`/api/channels/${encodeURIComponent(code)}/schema/diff`),
+  mapping: (code: string) => get<ChannelMapping>(`/api/channels/${encodeURIComponent(code)}/mapping`),
+  saveMapping: (code: string, body: ChannelMappingUpdate) =>
+    put<ChannelMapping>(`/api/channels/${encodeURIComponent(code)}/mapping`, body),
+  dryRun: (code: string, body: PublishRequest) => post<Publish>(`/api/channels/${encodeURIComponent(code)}/dry-run`, body),
+  publish: (code: string, body: PublishRequest) => post<Publish>(`/api/channels/${encodeURIComponent(code)}/publish`, body),
+  health: (code: string) => get<ChannelHealth>(`/api/channels/${encodeURIComponent(code)}/health`),
+  delta: (code: string, viewId?: string) => get<ChannelDelta>(`/api/channels/${encodeURIComponent(code)}/delta${qs({ view_id: viewId })}`),
+  schedule: (code: string) => get<ExportSchedule>(`/api/channels/${encodeURIComponent(code)}/schedule`),
+  saveSchedule: (code: string, body: ExportSchedule) => put<ExportSchedule>(`/api/channels/${encodeURIComponent(code)}/schedule`, body),
+  runNow: (code: string) => post<RunNowResult>(`/api/channels/${encodeURIComponent(code)}/schedule/run-now`),
+};
+
+export const publishApi = {
+  list: (params: { channel?: string; kind?: string; page?: number } = {}) => get<PublishList>(`/api/publishes${qs(params)}`),
+  detail: (id: string) => get<PublishDetail>(`/api/publishes/${encodeURIComponent(id)}`),
+  items: (id: string, params: { status?: string; page?: number } = {}) =>
+    get<PublishItemList>(`/api/publishes/${encodeURIComponent(id)}/items${qs(params)}`),
+  fileUrl: (id: string, name: string) => `/api/publishes/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+  feedback: (id: string, file?: File | null) => {
+    const fd = new FormData();
+    if (file) fd.append("file", file);
+    return request<FeedbackResult>(`/api/publishes/${encodeURIComponent(id)}/feedback`, { method: "POST", body: fd });
+  },
+};
+
+// ---- Eligibility (EXP-12) ----
+export const eligibilityApi = {
+  get: (entityId: string) => get<Eligibility>(`/api/products/${encodeURIComponent(entityId)}/eligibility`),
+  override: (entityId: string, body: { channel_code: string; reason: string; expires_at?: string }) =>
+    post<EligibilityOverride>(`/api/products/${encodeURIComponent(entityId)}/eligibility-override`, body),
+  removeOverride: (id: string) => del<void>(`/api/eligibility-overrides/${encodeURIComponent(id)}`),
 };
 
 export function errorMessage(err: unknown): string {

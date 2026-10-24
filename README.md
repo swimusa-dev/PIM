@@ -56,6 +56,15 @@ per-batch rollback (IMP-01 to IMP-08), keyed worksheets (IMP-12), bulk actions (
 and manager view (DM-07), comments with mentions and notifications (DM-09), carryover for new colors (DM-12),
 product-to-product compare (DM-06), and the rules engine with GOV-06 safety checks (GOV-01).
 
+## Phase 3 (channel exports and images)
+
+Phase 3 adds target schema loaders with diffs (EXP-02), payload building with transforms and validation plus dry
+runs (EXP-04), publish history with retailer feedback, internal/external tagging and channel health (EXP-05),
+delta detection and scheduled exports (EXP-06), eligibility overrides with admin approval (EXP-12), tier 3 image
+candidates behind a flag (IMG-03), image ordering and technical rule checks (IMG-05), Air write-back on confirm
+(IMG-06) and per-channel renditions (IMG-07). Direct Shopify writes (EXP-07) stay off; a Shopify publish builds
+an EXP-13 package. See `docs/api-contract-phase3.md` and section 8b of the setup guide.
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status

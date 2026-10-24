@@ -210,5 +210,9 @@ class Channel(Base, TimestampMixin):
     protected_fields: Mapped[list] = mapped_column(JSON, default=list)  # EXP-07 v1.3, never written
     attribute_mapping: Mapped[dict] = mapped_column(JSON, default=dict)  # our attr code -> target field
     target_schema: Mapped[dict] = mapped_column(JSON, default=dict)  # EXP-02 loaded schema
+    last_schema_diff: Mapped[dict] = mapped_column(JSON, default=dict)  # EXP-02 diff from the previous load
+    transforms: Mapped[list] = mapped_column(JSON, default=list)  # EXP-01 transformation rules
+    image_profile: Mapped[dict] = mapped_column(JSON, default=dict)  # IMG-07
+    schedule: Mapped[dict] = mapped_column(JSON, default=dict)  # EXP-06
     eligibility: Mapped[dict] = mapped_column(JSON, default=dict)  # EXP-12 rules
     config: Mapped[dict] = mapped_column(JSON, default=dict)  # transport, file format, schedule, image profile

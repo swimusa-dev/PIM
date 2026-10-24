@@ -1,0 +1,6 @@
+Code;Label;Hierarchy code;Type;Type parameter;Required;Values list;Description
+product_title;Product title;SWIM;TEXT;150;true;;Title
+product_description;Description;SWIM;LONG_TEXT;2000;true;;Long description
+color_family;Color family;SWIM;LIST;;true;COLORS;Color family
+fabric_content;Fabric content;SWIM;TEXT;200;false;;Content
+eco_claims;Eco claims;SWIM;LIST_MULTIPLE_VALUES;;false;CLAIMS;Claims

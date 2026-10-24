@@ -17,6 +17,8 @@ import { WorksheetsPage } from "./pages/Worksheets";
 import { BulkPage } from "./pages/Bulk";
 import { WorkflowsPage } from "./pages/Workflows";
 import { ComparePage } from "./pages/Compare";
+import { ExportsPage } from "./pages/Exports";
+import { ExportDetailPage } from "./pages/ExportDetail";
 import { Empty } from "./components/Common";
 
 export function App() {
@@ -32,6 +34,8 @@ export function App() {
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/packages" element={<PackagesPage />} />
         <Route path="/packages/:id" element={<PackageDetailPage />} />
+        <Route path="/exports" element={<ExportsPage />} />
+        <Route path="/exports/:id" element={<ExportDetailPage />} />
         <Route path="/images" element={<ImagesPage />} />
         <Route path="/imports" element={<ImportsPage />} />
         <Route path="/imports/new" element={<ImportWizardPage />} />

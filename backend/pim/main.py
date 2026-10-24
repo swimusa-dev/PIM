@@ -22,7 +22,9 @@ from pim.api import (
     approvals,
     bulk,
     dashboard,
+    exports,
     health,
+    images,
     imports,
     metadata,
     packages,
@@ -61,7 +63,8 @@ def create_app() -> FastAPI:
         response.headers["X-Request-Id"] = rid
         return response
 
-    for r in (health, metadata, workflows, products, views, approvals, packages, reference, dashboard, admin, imports, bulk):
+    for r in (health, metadata, workflows, products, views, approvals, packages, reference, dashboard, admin, imports, bulk,
+              exports, images):
         app.include_router(r.router)
 
     @app.on_event("startup")

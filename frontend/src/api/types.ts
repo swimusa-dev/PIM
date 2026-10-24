@@ -155,6 +155,10 @@ export interface ImageLink {
   width?: number;
   height?: number;
   sort_order: number;
+  // Phase 3 (IMG-03, IMG-05, IMG-06): rule failures per channel, AI-generated flag, match evidence.
+  rule_failures?: Record<string, string[]>;
+  ai_generated_image?: boolean;
+  evidence?: Record<string, unknown>;
 }
 
 // ---- Endpoint payloads ----
@@ -427,7 +431,7 @@ export interface PackageCreate {
   snapshot: { mode: "api" | "csv_upload" };
 }
 
-export type ImageQueueKind = "candidates" | "missing" | "unparsed";
+export type ImageQueueKind = "candidates" | "missing" | "unparsed" | "failing_rules";
 
 // IMG-05 queues. The contract does not fix the row shapes per kind, so the
 // frontend accepts the union below and renders what is present.
@@ -450,13 +454,17 @@ export interface ImageQueueUnparsed {
 }
 export interface ImageQueue {
   kind: ImageQueueKind;
-  rows: (ImageQueueCandidate | ImageQueueMissing | ImageQueueUnparsed)[];
+  rows: (ImageQueueCandidate | ImageQueueMissing | ImageQueueUnparsed | ImageQueueFailingRules)[];
   total?: number;
 }
 
 export interface ProductImages {
   slots: { shot_type: string; required_by: string[]; link?: ImageLink | null }[];
   candidates: ImageLink[];
+  // Phase 3: every non-rejected link in sort order (slots keep one link per shot type; ordering needs them all).
+  links?: ImageLink[];
+  // Phase 3: the technical image rules per channel (shape owned by the backend, rendered as key/value).
+  rules?: Record<string, Record<string, unknown>>;
 }
 
 export interface ErpDefect {
@@ -1031,4 +1039,253 @@ export interface RuleRun {
   trigger?: string;
   by?: string;
   [key: string]: unknown;
+}
+
+// =====================================================================================
+// Phase 3 (docs/api-contract-phase3.md): channel exports (EXP-01, EXP-02, EXP-04, EXP-05,
+// EXP-06, EXP-12) and images (IMG-03, IMG-05, IMG-06, IMG-07).
+// =====================================================================================
+
+export type TargetFieldType = "string" | "number" | "integer" | "boolean" | "enum" | "array" | "object" | "date";
+
+export interface TargetField {
+  name: string;
+  type: TargetFieldType;
+  required: boolean;
+  enum?: string[];
+  max_length?: number;
+  min?: number;
+  max?: number;
+  group?: string | null;
+  description?: string | null;
+  path?: string | null; // JSON pointer inside the payload for API channels
+}
+
+export type TargetSchemaSource = "walmart_spec" | "mirakl" | "shopify" | "retailer_xlsx" | "manual";
+
+export interface TargetSchema {
+  source: TargetSchemaSource;
+  version?: string | null;
+  loaded_at: string;
+  product_type?: string | null;
+  fields: TargetField[];
+  raw_available: boolean;
+}
+
+export interface SchemaDiff {
+  added: TargetField[];
+  removed: TargetField[];
+  required_changed: { name: string; before: boolean; after: boolean }[];
+  enum_changed: { name: string; added: string[]; removed: string[] }[];
+}
+
+export type ChannelTransformOp = "concatenate" | "format" | "unit_convert" | "conditional" | "case" | "truncate";
+
+// concatenate {parts[], separator}; format {template "{{attr.x}} ..."}; unit_convert {from,to};
+// conditional {when: Condition, then: value, else?: value}; case {mode}; truncate {max_length}
+export interface ChannelTransform {
+  target: string;
+  op: ChannelTransformOp;
+  args: Record<string, unknown>;
+}
+
+export interface ImageProfile {
+  shot_types: string[];
+  width?: number;
+  height?: number;
+  format: "jpg" | "png" | "webp";
+  pad_to_ratio?: string | null;
+  background?: "white" | "transparent" | null;
+  naming?: string | null; // e.g. "{{style_number}}-{{color_code}}-{{seq}}"
+}
+
+export interface ChannelMapping {
+  attribute_mapping: Record<string, string>;
+  transforms: ChannelTransform[];
+  value_mappings: { attribute_code: string; list_code: string; mapped: number; unmapped: string[] }[];
+  gaps: { required_fields_unmapped: string[]; mapped_fields_missing_in_schema: string[] };
+  // Assumption: the GET also echoes the image profile saved with the PUT so the editor can show it.
+  image_profile?: ImageProfile | null;
+}
+
+export interface ChannelMappingUpdate {
+  attribute_mapping: Record<string, string>;
+  transforms: ChannelTransform[];
+  image_profile?: ImageProfile;
+}
+
+export type PayloadIssueKind = "missing_required" | "invalid_type" | "enum" | "length" | "schema" | "transform" | "image";
+
+export interface PayloadIssue {
+  entity_id: string;
+  label: string;
+  field?: string | null;
+  attribute_code?: string | null;
+  message: string;
+  kind: PayloadIssueKind;
+  severity: "error" | "warning";
+}
+
+export type PublishKind = "dry_run" | "package" | "publish" | "scheduled";
+export type PublishMode = "delta" | "full";
+export type PublishStatus = "running" | "completed" | "failed" | "skipped" | "submitted" | "accepted" | "partial" | "rejected";
+
+export interface PublishFile {
+  name: string;
+  size: number;
+  kind: string;
+}
+
+export interface Publish {
+  id: string;
+  channel_code: string;
+  channel_version: number;
+  kind: PublishKind;
+  mode: PublishMode;
+  status: PublishStatus;
+  created_by: string;
+  created_at: string;
+  finished_at?: string | null;
+  product_count: number;
+  valid_count: number;
+  invalid_count: number;
+  selection: Record<string, unknown>;
+  files: PublishFile[];
+  summary: Record<string, unknown>; // dry_run: summary.preview object[]; package transport: summary.package_id
+  external_batch_id?: string | null;
+  error?: string | null;
+}
+
+export type PublishItemStatus = "pending" | "valid" | "invalid" | "submitted" | "accepted" | "rejected" | "in_review";
+
+export interface PublishItemError {
+  message: string;
+  field?: string | null;
+  attribute_code?: string | null;
+  kind: "internal" | "external";
+}
+
+export interface PublishItem {
+  id: string;
+  entity_id: string;
+  label: string;
+  external_id?: string | null;
+  status: PublishItemStatus;
+  issues: PayloadIssue[];
+  errors: PublishItemError[];
+  updated_at: string;
+}
+
+export interface PublishDetail extends Publish {
+  items: PublishItem[];
+}
+
+export interface PublishList {
+  rows: Publish[];
+  total: number;
+}
+
+export interface PublishItemList {
+  rows: PublishItem[];
+  total: number;
+}
+
+export interface PublishSelection {
+  view_id?: string;
+  entity_ids?: string[];
+  changed_since?: string;
+}
+
+export interface PublishRequest {
+  selection: PublishSelection;
+  mode: PublishMode;
+  preview: number;
+}
+
+export interface FeedbackResult {
+  updated: number;
+  accepted: number;
+  rejected: number;
+  in_review: number;
+}
+
+export interface ChannelHealth {
+  channel_code: string;
+  publishes: number;
+  products_sent: number;
+  accepted: number;
+  rejected: number;
+  in_review: number;
+  health_score: number | null;
+  last_publish_at?: string | null;
+  last_success_at?: string | null;
+  open_rejections: number;
+  top_errors: { message: string; count: number; kind: "internal" | "external" }[];
+}
+
+export interface ChannelDelta {
+  changed: number;
+  sample: { entity_id: string; label: string; reasons: string[] }[];
+}
+
+export interface ExportSchedule {
+  enabled: boolean;
+  mode: PublishMode;
+  every_hours?: number | null;
+  at_hour?: number | null;
+  at_minute?: number;
+  timezone: string;
+  view_id?: string | null;
+  last_run_at?: string | null;
+  last_result?: string | null;
+}
+
+export interface RunNowResult {
+  status: "started" | "skipped";
+  reason?: string;
+}
+
+export interface EligibilityOverride {
+  id: string;
+  entity_id: string;
+  channel_code: string;
+  reason: string;
+  approved_by: string;
+  created_at: string;
+  expires_at?: string | null;
+}
+
+export interface EligibilityChannel {
+  eligible: boolean;
+  reasons: string[];
+  override?: EligibilityOverride | null;
+}
+
+export interface Eligibility {
+  channels: Record<string, EligibilityChannel>;
+}
+
+export interface Rendition {
+  asset_id: string;
+  version_id?: string | null;
+  channel_code: string;
+  url: string;
+  width?: number | null;
+  height?: number | null;
+  format: string;
+  source: "air_cdn" | "job";
+  created_at: string;
+}
+
+export interface ShotType {
+  code: string;
+  label: string;
+  sort_order: number;
+}
+
+/** Rows of the failing_rules image queue: confirmed links plus the product label and the failing reasons. */
+export interface ImageQueueFailingRules extends ImageLink {
+  label?: string | null;
+  entity_label?: string | null;
+  reasons?: string[];
 }
