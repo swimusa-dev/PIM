@@ -66,6 +66,7 @@ class AttributeDefinition(Base, TimestampMixin):
     erp_column: Mapped[str | None] = mapped_column(String(128), nullable=True)  # IMP-09 mapping to Style Master
     not_required_means_na: Mapped[bool] = mapped_column(Boolean, default=False)  # IMP-10
     cost_restricted: Mapped[bool] = mapped_column(Boolean, default=False)  # D-05 masked unless role allowed
+    survivorship: Mapped[str | None] = mapped_column(String(32), nullable=True)  # IMP-06 override of the group policy
 
     group: Mapped[AttributeGroup] = relationship(back_populates="attributes")
     comments: Mapped[list[AttributeComment]] = relationship(back_populates="attribute")

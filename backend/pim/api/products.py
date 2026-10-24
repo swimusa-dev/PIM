@@ -116,6 +116,10 @@ def put_values(entity_id: str, body: ValuesBody, session: Session = Depends(get_
             continue
         res = set_value(session, meta, user, ent, attr, raw, channel_code=body.channel_code, change_set=cs)
         results.append({"attribute_code": code, "outcome": res.outcome, "message": res.message})
+    if any(r["outcome"] == "approved" for r in results):
+        from pim.services.rules import run_rules
+
+        run_rules(session, meta, "on_save", [ent], user_email=user.email)  # GOV-01 on-save rules
     refresh_snapshots(session, meta, [ent])
     session.commit()
     return {"results": results, "change_set_id": cs.id}

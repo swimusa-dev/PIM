@@ -20,6 +20,7 @@ from pim.models import (
     Family,
     FamilyGroup,
     FilenamePattern,
+    ImportSource,
     OptionList,
     OptionValue,
     PlaceholderToken,
@@ -168,6 +169,10 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
             session.add(UserRole(**ur))
         else:
             existing.brand_scopes = ur.get("brand_scopes", [])
+
+    # Import sources (IMP-08)
+    for src in _load("import_sources.yml").get("import_sources", []):
+        _upsert(session, ImportSource, "code", src)
 
     # Placeholders
     for p in _load("placeholders.yml").get("placeholders", []):

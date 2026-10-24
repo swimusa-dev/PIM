@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     import_volume: str = "./local_data/imports"
     package_volume: str = "./local_data/packages"
     erp_stale_threshold_hours: int = 26
+    mention_domain: str = "swimusa.com"  # DM-09: "@first.last" resolves to this domain
 
     # --- AI (AI-01) ------------------------------------------------------------------------
     ai_endpoint_copy: str = "databricks-claude-sonnet-4-5"

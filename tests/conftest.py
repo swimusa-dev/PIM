@@ -31,6 +31,8 @@ from pim.services.metadata import invalidate, load_metadata  # noqa: E402
 FIXTURES = Path(__file__).parent / "fixtures"
 
 MUTABLE_TABLES = [
+    "import_conflict", "import_row", "import_batch", "mapping_template", "worksheet_export", "bulk_action", "rule_run", "rule",
+    "comment", "notification",
     "update_package_row", "update_package", "publish_record", "asset_link", "asset", "value_history", "value_draft",
     "product_value", "readiness_snapshot", "prepack_component", "identifier_alias", "workflow_item", "erp_defect",
     "ingest_run", "job_run", "app_event", "saved_view", "reference_entity", "change_set", "product_entity",

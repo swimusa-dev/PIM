@@ -49,6 +49,13 @@ Follow **[docs/SETUP_AND_DEPLOY.md](docs/SETUP_AND_DEPLOY.md)**. In short: creat
 secret scope, UC schema and volumes; fill in `databricks.yml`; run `scripts/deploy.sh dev`; run the bootstrap and
 ingest jobs; assign roles.
 
+## Phase 2 (imports, collaboration, rules)
+
+Phase 2 adds the five-step import wizard with templates, value mappings, validation, matching, survivorship and
+per-batch rollback (IMP-01 to IMP-08), keyed worksheets (IMP-12), bulk actions (DM-04), workflows with an inbox
+and manager view (DM-07), comments with mentions and notifications (DM-09), carryover for new colors (DM-12),
+product-to-product compare (DM-06), and the rules engine with GOV-06 safety checks (GOV-01).
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status
