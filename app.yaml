@@ -39,6 +39,12 @@ env:
     valueFrom: package-job
   - name: DATABRICKS_JOB_ID_HISTORY
     valueFrom: history-job
+  - name: DATABRICKS_JOB_ID_IMPORT_COMMIT
+    valueFrom: import-commit-job
+  - name: DATABRICKS_JOB_ID_BULK
+    valueFrom: bulk-job
+  - name: DATABRICKS_JOB_ID_RULES
+    valueFrom: rules-job
   - name: PIM_FEATURE_SHOPIFY_DIRECT_WRITE
     # EXP-07 stays off until the owner approves direct writes (EXP-13 is the Phase 1 path).
     value: "false"

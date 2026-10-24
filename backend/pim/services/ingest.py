@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -24,7 +24,6 @@ from pim.models import (
     PrepackComponent,
     ProductEntity,
     WorkflowDefinition,
-    WorkflowItem,
 )
 from pim.models._common import utcnow
 from pim.normalization import looks_like_test_value, map_raw_to_option, normalize_identifier
@@ -170,19 +169,14 @@ def _record_defect(session: Session, ent: ProductEntity, attr_code: str, column:
 
 
 def _start_launch_workflow(session: Session, ent: ProductEntity, stats: _Stats, now: datetime) -> None:
+    from pim.services.workflow import start_workflow
+
     wf = session.execute(select(WorkflowDefinition).where(
         WorkflowDefinition.code == "new_style_color_launch", WorkflowDefinition.enabled.is_(True))).scalar_one_or_none()
     if wf is None or not wf.steps:
         return
-    exists = session.execute(select(WorkflowItem.id).where(
-        WorkflowItem.workflow_id == wf.id, WorkflowItem.entity_id == ent.id, WorkflowItem.state == "open")).first()
-    if exists:
-        return
-    step = wf.steps[0]
-    session.add(WorkflowItem(workflow_id=wf.id, entity_id=ent.id, current_step_id=step.id, state="open",
-                             due_at=now + timedelta(days=step.due_in_days), assigned_role=step.role_code,
-                             history=[{"at": now.isoformat(), "event": "started", "step": step.label}]))
-    stats.workflows += 1
+    if start_workflow(session, load_metadata(session), wf, ent, by="ingest") is not None:
+        stats.workflows += 1
 
 
 def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",

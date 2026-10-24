@@ -52,6 +52,21 @@ resources:
           job:
             id: ${resources.jobs.pim_publish_history.id}
             permission: CAN_MANAGE_RUN
+        - name: import-commit-job
+          description: Import commit (IMP-07)
+          job:
+            id: ${resources.jobs.pim_import_commit.id}
+            permission: CAN_MANAGE_RUN
+        - name: bulk-job
+          description: Bulk actions (DM-04)
+          job:
+            id: ${resources.jobs.pim_bulk_action.id}
+            permission: CAN_MANAGE_RUN
+        - name: rules-job
+          description: Nightly rules and digest (GOV-01)
+          job:
+            id: ${resources.jobs.pim_rules_nightly.id}
+            permission: CAN_MANAGE_RUN
         - name: bootstrap-job
           description: Alembic upgrade and seed load
           job:

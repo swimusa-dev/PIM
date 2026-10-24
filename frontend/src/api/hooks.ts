@@ -67,3 +67,18 @@ export function isAdmin(me: Me | undefined): boolean {
   if (!me) return false;
   return me.roles.some((r) => /admin/i.test(r)) || me.permissions.includes("admin") || me.permissions.includes("admin_metadata");
 }
+
+// ---- Phase 2 shared hooks ----
+export function useImportSources() {
+  return useQuery({ queryKey: ["imports", "sources"], queryFn: api.imports.sources, staleTime: METADATA_STALE });
+}
+
+export function useWorkflows() {
+  return useQuery({ queryKey: ["workflows", "definitions"], queryFn: api.workflows.list, staleTime: METADATA_STALE });
+}
+
+/** Unwraps list endpoints that may return a bare array or {rows}. */
+export function rowsOf<T>(data: T[] | { rows: T[] } | undefined | null): T[] {
+  if (!data) return [];
+  return Array.isArray(data) ? data : (data.rows ?? []);
+}

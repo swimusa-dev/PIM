@@ -168,6 +168,7 @@ def refresh_snapshots(session: Session, meta: Metadata, entities: list[ProductEn
                 targets.append(p)
     if not targets:
         return
+    targets = list({t.id: t for t in targets}.values())
     ids = [t.id for t in targets]
     session.execute(delete(ReadinessSnapshot).where(ReadinessSnapshot.entity_id.in_(ids)))
     styles = {s.id: s for s in session.execute(select(ProductEntity).where(

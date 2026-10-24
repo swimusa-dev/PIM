@@ -167,7 +167,7 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
 
 ## 6. First data load
 
-1. Run the bootstrap job once so Alembic records the baseline revision:
+1. Run the bootstrap job once so Alembic applies the migrations (baseline and Phase 2):
    `databricks bundle run pim_bootstrap -t dev`
 2. Run the Style Master ingest: `databricks bundle run pim_style_master_ingest -t dev`, or in the app:
    **Admin > Telemetry > Run ingest now**. The run creates styles, style-colors, and SKUs, maps ERP option
@@ -217,6 +217,22 @@ Files are stored under `/Volumes/swim_data_whse/pim/packages/<package id>/v<n>/`
 stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves them.
 
 ---
+
+## 8a. Imports, worksheets, bulk actions, workflows, rules (Phase 2)
+
+- **Imports** run from the Imports page. Sources are seeded (`seeds/import_sources.yml`); add vendors as sources in
+  Imports > Sources so their mapping templates and value mappings are remembered per vendor (IMP-02, IMP-03).
+  Uploaded files land in `/Volumes/swim_data_whse/pim/imports/<batch id>/`. Commit runs the `pim_import_commit` job
+  on Databricks (inline locally); rollback is available on every committed batch.
+- **Keyed worksheets** (IMP-12) are generated from Worksheets and come back through Imports with source
+  "Keyed worksheet". Files are stored under the packages volume at `worksheets/<id>/`.
+- **Bulk actions** (DM-04) start from the product grid selection or a saved view, always preview first, and run
+  through the `pim_bulk_action` job (inline locally). Every action can be rolled back from Bulk history.
+- **Workflows** (DM-07): the seeded launch workflow starts on new style-colors from the ingest. Edit definitions in
+  Workflows > Admin. The notification digest and nightly rules run in `pim_rules_nightly`; unpause its schedule.
+- **Rules** (GOV-01) live in Admin > Rules. A rule stays a draft until a preview passes the GOV-06 checks (20 sample
+  products across at least 3 brand scopes, no suspicious constants) or an admin forces activation with a reason.
+  On-save rules run inside the save request; on-import rules after each commit; nightly rules in the job.
 
 ## 9. Images from Air (IMG-01 to IMG-06)
 

@@ -1,17 +1,23 @@
-// App shell: left nav, top bar with signed-in email, ERP staleness banner (IMP-09).
+// App shell: left nav, top bar with signed-in email and notification bell (DM-09), ERP staleness banner (IMP-09).
 
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useHealth, useMe } from "../api/hooks";
 import { formatDate, hoursSince } from "../lib/format";
+import { NotificationBell } from "./NotificationBell";
 
-const NAV = [
+const NAV: { to: string; label: string; end?: boolean; sub?: boolean }[] = [
   { to: "/", label: "Home", end: true },
   { to: "/products", label: "Products" },
+  { to: "/workflows", label: "My Work" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/imports", label: "Imports" },
+  { to: "/worksheets", label: "Worksheets" },
+  { to: "/bulk", label: "Bulk actions" },
   { to: "/packages", label: "Packages" },
   { to: "/images", label: "Images" },
   { to: "/reference", label: "Reference data" },
-  { to: "/admin", label: "Admin" },
+  { to: "/admin", label: "Admin", end: true },
+  { to: "/admin/rules", label: "Rules", sub: true },
 ];
 
 export function AppShell() {
@@ -33,7 +39,12 @@ export function AppShell() {
         </div>
         <nav>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? "active" : "")}>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) => `${isActive ? "active" : ""}${n.sub ? " sub" : ""}`}
+            >
               {n.label}
             </NavLink>
           ))}
@@ -48,6 +59,7 @@ export function AppShell() {
       <header className="shell-topbar">
         <span className="app-name">Swim USA PIM</span>
         <span className="user">
+          <NotificationBell />
           {me.isLoading && <span>Signing in</span>}
           {me.isError && <span style={{ color: "var(--red)" }}>Could not load /api/me</span>}
           {me.data && (

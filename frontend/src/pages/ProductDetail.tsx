@@ -1,6 +1,6 @@
-// DM-05, DM-01, DM-06, DM-11, IMG-05, GOV-02, EXP-03: Product detail page. Header with identifiers,
-// hierarchy tree, completeness per channel with "show only missing required", attribute groups,
-// channel override compare, images panel, history tab.
+// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, EXP-03: Product detail page. Header with
+// identifiers, hierarchy tree, completeness per channel with "show only missing required", attribute groups,
+// channel override compare, images panel, history tab, comments tab, workflow panel, carryover, compare link.
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -13,9 +13,12 @@ import { TreePanel } from "../detail/TreePanel";
 import { AttributeForm } from "../detail/AttributeForm";
 import { ImagesPanel } from "../detail/ImagesPanel";
 import { HistoryTab } from "../detail/HistoryTab";
+import { CommentsTab } from "../detail/CommentsTab";
+import { WorkflowPanel } from "../detail/WorkflowPanel";
+import { CarryoverDialog } from "../detail/CarryoverDialog";
 import { LEVEL_LABEL } from "../lib/format";
 
-type Tab = "attributes" | "images" | "history";
+type Tab = "attributes" | "images" | "history" | "comments";
 
 export function ProductDetailPage() {
   const { id = "" } = useParams();
@@ -25,6 +28,7 @@ export function ProductDetailPage() {
   const [missingChannel, setMissingChannel] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [compareChannel, setCompareChannel] = useState("");
+  const [showCarryover, setShowCarryover] = useState(false);
 
   const detail = useQuery({ queryKey: ["product", id, "detail", null], queryFn: () => api.products.detail(id) });
   const channelDetail = useQuery({
@@ -74,12 +78,24 @@ export function ProductDetailPage() {
             </span>
           ))}
         </div>
-        <h1 className="row">
-          {entity.label}
-          <Badge color="teal">{LEVEL_LABEL[entity.level]}</Badge>
-          <LifecycleBadge status={entity.lifecycle_status} />
-          {entity.entity_type === "prepack" && <Badge>prepack</Badge>}
-        </h1>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h1 className="row">
+            {entity.label}
+            <Badge color="teal">{LEVEL_LABEL[entity.level]}</Badge>
+            <LifecycleBadge status={entity.lifecycle_status} />
+            {entity.entity_type === "prepack" && <Badge>prepack</Badge>}
+          </h1>
+          <div className="row">
+            <Link to={`/compare?a=${encodeURIComponent(entity.entity_id)}`} className="btn small">
+              Compare with...
+            </Link>
+            {entity.level === "style_color" && (
+              <button className="small" onClick={() => setShowCarryover(true)} title="Copy a sibling color's approved values here as drafts (DM-12)">
+                Carryover
+              </button>
+            )}
+          </div>
+        </div>
         <div className="ids">
           <span>
             Style <b className="mono">{entity.style_number}</b>
@@ -162,6 +178,7 @@ export function ProductDetailPage() {
               { key: "attributes", label: "Attributes" },
               { key: "images", label: "Images", count: detail.data!.images.length },
               { key: "history", label: "History", count: detail.data!.history_count },
+              { key: "comments", label: "Comments" },
             ]}
           />
           {tab === "attributes" && (
@@ -193,9 +210,11 @@ export function ProductDetailPage() {
           )}
           {tab === "images" && <ImagesPanel entityId={entity.entity_id} />}
           {tab === "history" && <HistoryTab entityId={entity.entity_id} attributes={allAttributes} optionLists={listByCode} />}
+          {tab === "comments" && <CommentsTab entityId={entity.entity_id} attributes={allAttributes} />}
         </div>
 
         <div className="detail-right stack">
+          <WorkflowPanel entityId={entity.entity_id} />
           <div className="panel">
             <div className="panel-header">
               <h3>Children</h3>
@@ -267,6 +286,7 @@ export function ProductDetailPage() {
           </div>
         </div>
       </div>
+      {showCarryover && <CarryoverDialog entityId={entity.entity_id} attributes={allAttributes} onClose={() => setShowCarryover(false)} />}
     </div>
   );
 }

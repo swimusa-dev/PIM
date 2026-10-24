@@ -15,7 +15,8 @@ from pim.models._common import utcnow
 log = logging.getLogger(__name__)
 
 JOB_ENV = {"ingest": "DATABRICKS_JOB_ID_INGEST", "air_poll": "DATABRICKS_JOB_ID_AIR_POLL",
-           "package": "DATABRICKS_JOB_ID_PACKAGE", "history": "DATABRICKS_JOB_ID_HISTORY"}
+           "package": "DATABRICKS_JOB_ID_PACKAGE", "history": "DATABRICKS_JOB_ID_HISTORY",
+           "import_commit": "DATABRICKS_JOB_ID_IMPORT_COMMIT", "bulk": "DATABRICKS_JOB_ID_BULK", "rules": "DATABRICKS_JOB_ID_RULES"}
 
 
 def trigger_job(session: Session, kind: str, requested_by: str, params: dict) -> JobRun:
@@ -34,6 +35,10 @@ def trigger_job(session: Session, kind: str, requested_by: str, params: dict) ->
         return run
     if kind == "ingest":
         threading.Thread(target=_inline_ingest, args=(run.id,), daemon=True).start()
+        run.status = "running"
+        run.started_at = utcnow()
+    elif kind in ("import_commit", "bulk", "rules"):
+        # Locally (no job bound) the work runs inline in the request thread after commit; see the API layer.
         run.status = "running"
         run.started_at = utcnow()
     else:

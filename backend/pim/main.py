@@ -17,7 +17,20 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from pim import __version__
-from pim.api import admin, approvals, dashboard, health, metadata, packages, products, reference, views
+from pim.api import (
+    admin,
+    approvals,
+    bulk,
+    dashboard,
+    health,
+    imports,
+    metadata,
+    packages,
+    products,
+    reference,
+    views,
+    workflows,
+)
 from pim.config import get_settings
 
 log = logging.getLogger("pim.request")
@@ -48,7 +61,7 @@ def create_app() -> FastAPI:
         response.headers["X-Request-Id"] = rid
         return response
 
-    for r in (health, metadata, products, views, approvals, packages, reference, dashboard, admin):
+    for r in (health, metadata, workflows, products, views, approvals, packages, reference, dashboard, admin, imports, bulk):
         app.include_router(r.router)
 
     @app.on_event("startup")

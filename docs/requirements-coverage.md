@@ -40,18 +40,26 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 
 ## Phase 2, collaboration and imports
 
-| ID | Status | Notes |
+| ID | Status | Where |
 |---|---|---|
-| DM-06 Compare and copy | Partial | global vs channel compare with copy on the detail page; product vs product not built |
-| DM-07 Workflows | Seam | definitions, steps, items, launch workflow started by ingest; inbox and manager views not built |
-| DM-08 Drafts and approval | Built | drafts, queue grouped by submitter, approve or reject |
-| DM-09 Comments | Not started | |
-| DM-10 Dashboards | Built | counts, blocking launches, readiness by channel, recent ingest and packages |
-| DM-12 Carryover | Not started | inheritance covers style-level values; sibling-color copy as drafts not built |
-| DM-13 Relationships | Not started | optional per v1.3 |
-| IMP-01 to IMP-08 Import wizard | Not started | parsers for the setup-file layout have a fixture; staging tables and wizard pending |
-| IMP-12 Keyed worksheets | Not started | `feed_file` XLSX writer is the base |
-| GOV-01 Rules engine | Not started | |
+| DM-04 Bulk actions | Built | `services/bulk.py`: set, clear, add/remove option, find and replace, copy attribute, change family, assign workflow, run AI (as drafts), send for approval; preview of 20 and total; job or inline; report; single change set with rollback |
+| DM-06 Compare and copy | Built | global vs channel on the detail page; product vs product at `/compare` with copy per row (`GET /api/products/compare`, `POST /api/products/{id}/copy-from`) |
+| DM-07 Workflows | Built | definitions up to 20 steps, inbox (mine, role, all), overdue tags, manager view by step and age, advance, reject to an earlier step with per-attribute comments, assign; email digest is a logging seam until an email adapter exists |
+| DM-08 Drafts and approval | Built | |
+| DM-09 Comments and mentions | Built | per product and per attribute, `@first.last` or `@email` mentions, in-app notifications with a bell, digest seam |
+| DM-10 Dashboards | Built | |
+| DM-12 Carryover | Built | sibling colors with approved value counts; copy as drafts without overwriting; launch workflow skips steps whose groups are already approved |
+| DM-13 Relationships | Not started | optional per v1.3 (Layer owns Shopify cross-sell data) |
+| IMP-01 Import wizard | Built | Upload, Map, Validate, Match, Review and Commit; CSV and XLSX with multiple sheets, header row detection, merged group headers, text dates; files stored in the import volume; nothing touches product data before commit |
+| IMP-02 Mapping templates | Built | templates per source auto-applied by structure signature; up to four sources per target; transforms trim, split, concat, regex extract, value replace, unit convert, HTML clean, date parse, case; header-similarity suggestions with confidence (AI suggester is a hook), hidden below 70 percent, never auto-accepted; required targets block progress |
+| IMP-03 Value mapping | Built | distinct incoming values per select attribute with suggestions, remembered per source |
+| IMP-04 Validation | Built | summary, error grid, error file in the source layout with an Errors column, skip row or skip value |
+| IMP-05 Matching | Built | ordered keys through identifier aliases (UPC, SKU, style and color, style, vendor style, GMS), lift to the batch level, ambiguous detection, assisted fuzzy candidates confirmed by a person, keyless name extraction ("the Skylar Top"), create / update-only / create-under-match policies; match keys are never overwritten |
+| IMP-06 Survivorship | Built | trusted source priority, fill empty only, most recent, never from import; per group with per-attribute override; conflicts queue with accept, reject, edit |
+| IMP-07 Review and commit | Built | diff of creates, adds, changes, conflicts, skipped; commit as a job (inline locally); per-batch rollback restoring prior values and removing created entities unless touched later; import history |
+| IMP-08 Presets | Built | supplier, retailer template, Shopify backfill from an API snapshot or product CSV, keyed worksheet; mixed files per batch with precedence |
+| IMP-12 Keyed worksheets | Built | XLSX with group and field header rows, frozen panes, hidden locked key columns with checksum, dropdowns, shaded ERP context, Instructions tab; returned files recognized by id, matched by key, locked-column edits rejected |
+| GOV-01 Rules engine | Built | condition/action rules by priority on save, on import, nightly; set, clear, copy, concatenate, calculate, set approval state, add to workflow, trigger AI (as a suggestion); GOV-06 preview on 20 samples across 3 brands with a suspicious-constant check before activation |
 
 ## Phase 3, Shopify and images
 

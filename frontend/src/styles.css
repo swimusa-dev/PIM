@@ -1206,3 +1206,466 @@ table.data.compact td {
   gap: 4px;
   flex-wrap: wrap;
 }
+
+/* ---------- Phase 2: nav sub items, notification bell ---------- */
+.shell-nav nav a.sub {
+  padding-left: 24px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.bell {
+  position: relative;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+}
+.bell-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--red);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  line-height: 1.3;
+}
+.notif-popover {
+  left: auto;
+  right: 0;
+  min-width: 340px;
+  max-width: 420px;
+}
+.notif {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.notif:hover {
+  background: var(--teal-faint);
+}
+.notif.unread .notif-title {
+  font-weight: 600;
+}
+.notif.unread {
+  border-left: 3px solid var(--teal);
+}
+
+/* ---------- Phase 2: import wizard (IMP-01) ---------- */
+.stepper {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.stepper button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.stepper button .n {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+}
+.stepper button.done .n {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.stepper button.current {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+  background: var(--teal-light);
+  font-weight: 600;
+}
+.stepper button.current .n {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 28px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--teal-faint);
+  cursor: pointer;
+}
+.dropzone.over {
+  border-color: var(--teal);
+  background: var(--teal-light);
+}
+.banner.info {
+  background: var(--blue-bg);
+  color: var(--blue);
+  border: 1px solid #c7d6f2;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.banner.ok {
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid #bfe3cc;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.banner.warn.boxed {
+  border: 1px solid #f0d9a8;
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  padding: 8px 12px;
+}
+.source-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.source-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  background: var(--surface);
+}
+.source-card:hover {
+  background: var(--teal-faint);
+}
+.source-card.selected {
+  border-color: var(--teal);
+  background: var(--teal-light);
+}
+.source-card .kind {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.samples {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 10px;
+  background: var(--teal-light);
+  color: var(--teal-dark);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chip button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--teal-dark);
+  line-height: 1;
+}
+.transforms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.transform-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.transform-row input,
+.transform-row select {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.confidence {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.confidence.hi {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.confidence.mid {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.confidence.lo {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ordered-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ordered-list .item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.ordered-list .item .idx {
+  width: 18px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.map-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  .map-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.issue {
+  display: block;
+  font-size: 11px;
+  color: var(--red);
+}
+.issue.warn {
+  color: var(--amber);
+}
+.diff-cell {
+  background: #fffaf0;
+}
+.wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Phase 2: workflows (DM-07) ---------- */
+.age-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.age-bar .seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 0;
+}
+.age-bar .seg.b0 {
+  background: var(--green);
+}
+.age-bar .seg.b1 {
+  background: var(--teal);
+}
+.age-bar .seg.b2 {
+  background: var(--amber);
+}
+.age-bar .seg.b3 {
+  background: var(--red);
+}
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.step-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface);
+}
+.step-progress {
+  display: inline-flex;
+  gap: 2px;
+}
+.step-progress i {
+  width: 10px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.step-progress i.done {
+  background: var(--green);
+}
+.step-progress i.current {
+  background: var(--teal);
+}
+
+/* ---------- Phase 2: comments (DM-09) ---------- */
+.comment {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.comment.resolved {
+  opacity: 0.65;
+}
+.comment .meta {
+  font-size: 11px;
+  color: var(--text-faint);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.comment .body {
+  white-space: pre-wrap;
+  margin-top: 4px;
+}
+.mention {
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+.composer-hint {
+  background: var(--teal-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- Phase 2: compare (DM-06) ---------- */
+.compare-table td.differs {
+  background: #fffaf0;
+}
+.compare-table td.differs.a {
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.15);
+  z-index: 25;
+  max-height: 260px;
+  overflow: auto;
+}
+.search-results .item {
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.search-results .item:hover {
+  background: var(--teal-faint);
+}
+
+/* ---------- Phase 2: rules (GOV-01) ---------- */
+.cond-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--teal-faint);
+}
+.action-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.action-row select,
+.action-row input {
+  padding: 3px 6px;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .track {
+  position: absolute;
+  inset: 0;
+  background: var(--border-strong);
+  border-radius: 9px;
+  transition: 0.15s;
+  cursor: pointer;
+}
+.switch .track::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: 0.15s;
+}
+.switch input:checked + .track {
+  background: var(--teal);
+}
+.switch input:checked + .track::before {
+  transform: translateX(16px);
+}
+.switch input:disabled + .track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Phase 2: grid row selection (DM-04) ---------- */
+.grid-table .row-select {
+  width: 13px;
+  height: 13px;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+.grid-table td.row-selected {
+  background: var(--teal-faint);
+}

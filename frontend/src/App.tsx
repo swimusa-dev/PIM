@@ -11,6 +11,12 @@ import { PackagesPage } from "./pages/Packages";
 import { PackageDetailPage } from "./pages/PackageDetail";
 import { ImagesPage } from "./pages/Images";
 import { AdminPage } from "./pages/Admin";
+import { ImportsPage } from "./pages/Imports";
+import { ImportWizardPage } from "./pages/ImportWizard";
+import { WorksheetsPage } from "./pages/Worksheets";
+import { BulkPage } from "./pages/Bulk";
+import { WorkflowsPage } from "./pages/Workflows";
+import { ComparePage } from "./pages/Compare";
 import { Empty } from "./components/Common";
 
 export function App() {
@@ -27,6 +33,13 @@ export function App() {
         <Route path="/packages" element={<PackagesPage />} />
         <Route path="/packages/:id" element={<PackageDetailPage />} />
         <Route path="/images" element={<ImagesPage />} />
+        <Route path="/imports" element={<ImportsPage />} />
+        <Route path="/imports/new" element={<ImportWizardPage />} />
+        <Route path="/imports/:id" element={<ImportWizardPage />} />
+        <Route path="/worksheets" element={<WorksheetsPage />} />
+        <Route path="/bulk" element={<BulkPage />} />
+        <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/compare" element={<ComparePage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/:tab" element={<AdminPage />} />
         <Route path="/index.html" element={<Navigate to="/" replace />} />

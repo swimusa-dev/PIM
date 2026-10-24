@@ -1,0 +1,28 @@
+# IMP-08 import source presets. trust_rank feeds IMP-06 survivorship (lower is more trusted):
+# ERP 0, PIM user-approved 1, retailer template 2, supplier file 3, Shopify legacy 4, AI 5.
+import_sources:
+  - code: supplier
+    label: Supplier or vendor spreadsheet
+    kind: supplier
+    trust_rank: 3
+    default_policy: {unmatched: update_only, on_error: skip_value}
+  - code: retailer_template
+    label: Retailer-provided product template
+    kind: retailer
+    trust_rank: 2
+    default_policy: {unmatched: update_only, on_error: skip_value}
+  - code: shopify
+    label: Existing Shopify product data (backfill or refresh)
+    kind: shopify
+    trust_rank: 4
+    default_policy: {unmatched: update_only, on_error: skip_value}
+  - code: worksheet
+    label: Keyed worksheet (returned PIM export)
+    kind: worksheet
+    trust_rank: 1
+    default_policy: {unmatched: update_only, on_error: skip_value}
+  - code: other
+    label: Other file
+    kind: other
+    trust_rank: 3
+    default_policy: {unmatched: update_only, on_error: skip_row}
