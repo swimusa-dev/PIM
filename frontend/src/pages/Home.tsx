@@ -1,10 +1,12 @@
-// DM-10: Home dashboard. Cards, products blocking launches, readiness by channel, recent ingest and packages.
+// DM-10, GOV-03: Home dashboard. Cards, products blocking launches, readiness by channel, recent ingest and packages,
+// and the quality by family card.
 
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Empty, ErrorBox, Spinner, StatusBadge } from "../components/Common";
 import { formatDate } from "../lib/format";
+import { QualityDashboard } from "../admin/Quality";
 
 export function HomePage() {
   const q = useQuery({ queryKey: ["dashboard"], queryFn: api.dashboard, refetchInterval: 120_000 });
@@ -123,6 +125,8 @@ export function HomePage() {
           </div>
         </div>
       </div>
+
+      <QualityDashboard fixedBy="family" compact />
 
       <div className="two-col">
         <div className="panel">

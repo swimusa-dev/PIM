@@ -85,14 +85,14 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 
 | ID | Status | Notes |
 |---|---|---|
-| AI-01 Unity Gateway routing | Built | `ai/service.py`, endpoints from config, call logging |
-| AI-02 Brand voice and templates | Partial | objects and rendering built; admin UI and DB persistence pending |
-| AI-03 Generate, review, apply | Partial | drafts with `ai_generated` and the approval queue exist; the Ask AI panel is not built |
-| AI-04 Bulk with sample preview | Not started | |
-| AI-05 Task types | Seam | task type list and template shape |
-| AI-06 Grounding | Built | NEEDS_INPUT detection, material, percentage, certification checks, certificate requirement, blocked terms, em dash check |
-| AI-07 Evaluation set | Not started | |
-| GOV-03 Quality score | Not started | |
+| AI-01 Unity Gateway routing | Built | `ai/service.py`: endpoints per task from config (`PIM_AI_ENDPOINT_COPY`, `PIM_AI_ENDPOINT_CLASSIFY`), multimodal invocation for images, every call logged as an `ai_call` app event with product, task, template version, model, tokens and latency (Admin > Telemetry) |
+| AI-02 Brand voice and templates | Built | `brand_voice` and versioned `prompt_template` tables seeded from `seeds/ai.yml`, Admin > AI editors, placeholders `{{attr.x}}`, `{{attr.ref.inner}}`, `{{core.x}}`, `{{input.text}}`, `{{channel.max_length}}`, `{{options}}`; length from the template, else the channel requirement, else the attribute; every output records the template version |
+| AI-03 Generate, review, apply | Built | Ask AI panel on the product page; every output is an `ai_output` plus a proposed `value_draft` (`ai_generated=true`); side-by-side with a word-level diff; accept, edit then accept (edit distance recorded, AI origin kept), regenerate, reject with a reason; accepted values stay `ai_generated` until a person edits them |
+| AI-04 Bulk with sample preview | Built | `POST /api/ai/runs` generates 5 samples synchronously; approve samples starts the `pim_ai_bulk` job (inline locally); results land in the approval queue grouped by run; accept all needs Approve rights on the target group; cancel honored between batches |
+| AI-05 Task types | Built | generate, adapt (channel override with the channel's length limit), extract (supplier text, document via pypdf locally or `ai_parse_document` on the warehouse, product images as multimodal parts), classify (option code with confidence; below the threshold it is shown, not drafted), check (findings only), restructure (legacy Fit Details into features, measurements and a model note), expand (ERP abbreviations to customer-facing text); all as templates in `seeds/ai.yml` |
+| AI-06 Grounding | Built | NEEDS_INPUT detection, material, percentage, certification checks, certificate requirement on the Fabric, blocked terms, em dash check; a failed check never creates a draft; the same certificate rule runs as a readiness warning and a GOV-03 quality check on human copy |
+| AI-07 Evaluation set | Built | `ai_eval_case` built from approved human-written values (50 by default), `ai_eval_run` scores token overlap, length, grounding and brand voice; a composite drop beyond `PIM_AI_EVAL_THRESHOLD` against the last passed run blocks the template (activation refused); MLflow logging when `PIM_MLFLOW_EXPERIMENT` is set; per-template acceptance rate, edit distance and rejection reasons at `/api/ai/metrics` |
+| GOV-03 Quality score | Built | `services/quality.py`: casing, spelling heuristics, length within attribute and channel limits, blocked terms, duplicate copy, image technical rules, unsupported certification claims; admin-excluded groups, weights and grade bands; A to E per channel plus overall in `quality_snapshot`; grid columns and filters, product panel, dashboard by family, season and channel; nightly `pim_quality_score` job and refresh on value change |
 
 ## Phase 5, marketplaces
 

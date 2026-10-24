@@ -188,6 +188,25 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
         if fp["regex"] not in existing_patterns:
             session.add(FilenamePattern(**fp))
 
+    # AI (AI-02): brand voices and templates; a template whose body changed gets a new version
+    ai = _load("ai.yml")
+    from pim.models import BrandVoice, PromptTemplate, PromptTemplateVersion
+
+    for bv in ai.get("brand_voices", []):
+        _upsert(session, BrandVoice, "brand_code", bv)
+    for tpl in ai.get("templates", []):
+        obj = session.get(PromptTemplate, tpl["code"])
+        if obj is None:
+            obj = PromptTemplate(**tpl, updated_by="seed")
+            session.add(obj)
+            session.flush()
+            session.add(PromptTemplateVersion(code=obj.code, version=1, body=obj.body, snapshot=dict(tpl), note="seed", updated_by="seed"))
+        elif obj.body.strip() != tpl["body"].strip() and obj.updated_by == "seed":
+            for k, v in tpl.items():
+                setattr(obj, k, v)
+            obj.version += 1
+            session.add(PromptTemplateVersion(code=obj.code, version=obj.version, body=obj.body, snapshot=dict(tpl), note="seed update", updated_by="seed"))
+
     # Workflows
     for wf in _load("workflows.yml").get("workflows", []):
         steps = wf.pop("steps", [])

@@ -143,34 +143,45 @@ class AIService:
         return self.endpoints["classify"] if task_type in ("classify", "extract", "check") else self.endpoints["copy"]
 
     def run(self, template: PromptTemplate, voice: BrandVoice, attrs: dict[str, Any], *, product_id: str,
-            image_urls: list[str] | None = None, has_certificate: bool = False, user_email: str = "system") -> AIResult:
+            image_urls: list[str] | None = None, has_certificate: bool = False, user_email: str = "system",
+            vision: bool = False, grounded: bool = True, endpoint: str | None = None, temperature: float = 0.3) -> AIResult:
+        """`vision=True` sends the images as multimodal parts (AI-05 extract from images); `grounded=False` skips the
+        prose grounding check for structured JSON tasks (classify, check, extract) whose output is parsed and
+        validated by the caller instead."""
         prompt = template.render(attrs)
         facts = "\n".join(f"- {k}: {v}" for k, v in attrs.items() if v not in (None, ""))
-        messages = [
-            {"role": "system", "content": SYSTEM_RULES + "\n\n" + voice.as_prompt()},
-            {"role": "user", "content": f"Input attributes (the only allowed facts):\n{facts}\n\nTask:\n{prompt}"},
-        ]
-        if image_urls:
-            messages[1]["content"] += "\n\nApproved image URLs (for visual context only):\n" + "\n".join(image_urls)
-        endpoint = self.endpoint_for(template.task_type)
+        user_text = f"Input attributes (the only allowed facts):\n{facts}\n\nTask:\n{prompt}"
+        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_RULES + "\n\n" + voice.as_prompt()}]
+        if image_urls and vision:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+            parts += [{"type": "image_url", "image_url": {"url": u}} for u in image_urls[:4]]
+            messages.append({"role": "user", "content": parts})
+        else:
+            if image_urls:
+                user_text += "\n\nApproved image URLs (for visual context only):\n" + "\n".join(image_urls)
+            messages.append({"role": "user", "content": user_text})
+        endpoint = endpoint or self.endpoint_for(template.task_type)
         started = time.monotonic()
-        out = self._factory(endpoint).chat(messages, self.max_tokens)
+        out = self._factory(endpoint).chat(messages, self.max_tokens, temperature=temperature)
         text = (out.get("content") or "").strip()
         result = AIResult(text=text, model=endpoint, template_version=template.version,
                           prompt_tokens=out.get("prompt_tokens", 0), completion_tokens=out.get("completion_tokens", 0), raw=out)
         result.needs_input = re.findall(r"NEEDS_INPUT:\s*([a-z0-9_]+)", text)
-        result.grounding_errors = grounding_check(text, attrs, has_certificate=has_certificate)
-        if template.max_length and len(text) > template.max_length:
-            result.grounding_errors.append(f"output exceeds {template.max_length} characters")
-        for term in voice.blocked_terms:
-            if term and term.lower() in text.lower():
-                result.grounding_errors.append(f"blocked term: {term}")
-        if "—" in text:
-            result.grounding_errors.append("contains an em dash")
+        if grounded:
+            result.grounding_errors = grounding_check(text, attrs, has_certificate=has_certificate)
+            if template.max_length and len(text) > template.max_length:
+                result.grounding_errors.append(f"output exceeds {template.max_length} characters")
+            for term in voice.blocked_terms:
+                if term and re.search(rf"\b{re.escape(term)}\b", text, re.IGNORECASE):
+                    result.grounding_errors.append(f"blocked term: {term}")
+            if "—" in text:
+                result.grounding_errors.append("contains an em dash")
+        latency = int((time.monotonic() - started) * 1000)
+        result.raw = {**out, "latency_ms": latency}
         self._log_call({"product_id": product_id, "task_type": template.task_type, "template": template.code,
                         "template_version": template.version, "model": endpoint, "user": user_email,
                         "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
-                        "latency_ms": int((time.monotonic() - started) * 1000), "ok": result.ok})
+                        "latency_ms": latency, "ok": result.ok})
         return result
 
 

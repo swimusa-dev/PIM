@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     ai_endpoint_copy: str = "databricks-claude-sonnet-4-5"
     ai_endpoint_classify: str = "databricks-claude-haiku-4-5"
     ai_max_tokens: int = 1024
+    ai_eval_threshold: float = 0.05  # AI-07: block a template when the composite drops by more than this
+    ai_eval_min_cases: int = 5
+    mlflow_experiment: str | None = None  # AI-07: log evaluation runs when set, for example /Shared/pim-ai-eval
+    ai_classify_confidence_threshold: float = 0.75  # AI-05 classify: below this the result is shown, not drafted
 
     # --- Adapters (ARC-05, GOV-05: secrets arrive as env vars via valueFrom) ----------------
     air_api_key: str | None = None

@@ -11,7 +11,15 @@ from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from pim.auth.identity import CurrentUser
-from pim.models import AssetLink, IdentifierAlias, ProductEntity, ProductValue, ReadinessSnapshot, ValueDraft
+from pim.models import (
+    AssetLink,
+    IdentifierAlias,
+    ProductEntity,
+    ProductValue,
+    QualitySnapshot,
+    ReadinessSnapshot,
+    ValueDraft,
+)
 from pim.services.metadata import LEVEL_ORDER, Metadata
 from pim.services.readiness import snapshots_for
 from pim.services.values import resolve_cells
@@ -139,6 +147,22 @@ def run_grid_query(session: Session, meta: Metadata, user: CurrentUser, q: GridQ
                 else:
                     want = str(val).lower() in ("true", "ready", "1", "yes")
                     stmt = stmt.where(exists().where(base).where(rs.ready.is_(want)))
+        elif fld.startswith("quality:"):
+            # GOV-03: grade filter (op in: ["A","B"]; eq: "A"; lt/gt on the score) on the style-color's snapshot
+            chan = fld.split(":", 1)[1]
+            chan = "" if chan == "overall" else chan
+            qs = aliased(QualitySnapshot)
+            owner = _entity_for_level("style_color", q.level, e, parent, grandparent) if q.level != "style" else None
+            grades = [str(x).upper() for x in (val if isinstance(val, list) else [val])] if op in ("in", "eq") else []
+            if q.level == "style":
+                child = aliased(ProductEntity)
+                base = and_(child.parent_id == e.id, qs.entity_id == child.id, qs.channel_code == chan)
+                pred = qs.grade.in_(grades) if grades else _num_pred(qs.score, op, val)
+                stmt = stmt.where(exists().where(base).where(pred))
+            elif owner is not None:
+                base = and_(qs.entity_id == owner.id, qs.channel_code == chan)
+                pred = qs.grade.in_(grades) if grades else _num_pred(qs.score, op, val)
+                stmt = stmt.where(exists().where(base).where(pred))
         elif fld == "approval_state":
             pv = aliased(ProductValue)
             stmt = stmt.where(exists().where(and_(pv.entity_id == e.id, pv.approval_state == val)))
@@ -186,6 +210,17 @@ def run_grid_query(session: Session, meta: Metadata, user: CurrentUser, q: GridQ
             if owner is not None:
                 rs = aliased(ReadinessSnapshot)
                 col = select(rs.completeness_pct).where(rs.entity_id == owner.id, rs.channel_code == chan).scalar_subquery()
+        elif fld.startswith("quality:"):
+            chan = fld.split(":", 1)[1]
+            chan = "" if chan == "overall" else chan
+            qs = aliased(QualitySnapshot)
+            if q.level == "style":
+                child = aliased(ProductEntity)
+                col = select(func.min(qs.score)).where(qs.channel_code == chan, qs.entity_id == child.id, child.parent_id == e.id).scalar_subquery()
+            else:
+                owner = _entity_for_level("style_color", q.level, e, parent, grandparent)
+                if owner is not None:
+                    col = select(qs.score).where(qs.entity_id == owner.id, qs.channel_code == chan).scalar_subquery()
         if col is not None:
             order_cols.append(col.desc().nullslast() if direction == "desc" else col.asc().nullsfirst())
     order_cols.append(e.id)
@@ -199,6 +234,7 @@ def run_grid_query(session: Session, meta: Metadata, user: CurrentUser, q: GridQ
     cells = resolve_cells(session, meta, user, entities, cols, q.channel_code)
     rows = [row_dict(session, meta, ent, cells.get(ent.id, {})) for ent in entities]
     _attach_readiness(session, rows, entities)
+    _attach_quality(session, rows, entities)
     return {"rows": rows, "total": total, "page": q.page, "page_size": q.page_size}
 
 
@@ -226,7 +262,7 @@ def row_dict(session: Session, meta: Metadata, ent: ProductEntity, values: dict[
         "brand_scopes": ent.brand_scopes or [], "parent_id": ent.parent_id, "label": ent.label,
         "launch_date": ent.launch_date.isoformat() if ent.launch_date else None,
         "size_unmapped": ent.size_unmapped,
-        "values": values, "completeness": {}, "readiness": {},
+        "values": values, "completeness": {}, "readiness": {}, "quality": {},
     }
 
 
@@ -274,3 +310,31 @@ def _fill(row: dict, snaps: dict) -> None:
     for chan, s in snaps.items():
         row["completeness"][chan] = s.completeness_pct
         row["readiness"][chan] = s.detail
+
+
+def _attach_quality(session: Session, rows: list[dict], entities: list[ProductEntity]) -> None:
+    """GOV-03 grades: style-colors their own, SKUs the parent's, styles the lowest grade of their colors."""
+    from pim.services.quality import scores_for
+
+    index = {r["entity_id"]: r for r in rows}
+    sc_ids = [e.id for e in entities if e.level == "style_color"]
+    sku_parents = {e.id: e.parent_id for e in entities if e.level == "sku" and e.parent_id}
+    style_ids = [e.id for e in entities if e.level == "style"]
+    kids = session.execute(select(ProductEntity.id, ProductEntity.parent_id).where(ProductEntity.parent_id.in_(style_ids),
+                                                                                   ProductEntity.level == "style_color")).all() if style_ids else []
+    snaps = scores_for(session, sc_ids + list(sku_parents.values()) + [k.id for k in kids])
+    for eid in sc_ids:
+        index[eid]["quality"] = {("overall" if c == "" else c): {"grade": s.grade, "score": s.score} for c, s in snaps.get(eid, {}).items()}
+    for eid, pid in sku_parents.items():
+        index[eid]["quality"] = {("overall" if c == "" else c): {"grade": s.grade, "score": s.score} for c, s in snaps.get(pid, {}).items()}
+    for sid in style_ids:
+        agg: dict[str, dict] = {}
+        for k in kids:
+            if k.parent_id != sid:
+                continue
+            for c, s in snaps.get(k.id, {}).items():
+                key = "overall" if c == "" else c
+                cur = agg.get(key)
+                if cur is None or s.score < cur["score"]:
+                    agg[key] = {"grade": s.grade, "score": s.score}
+        index[sid]["quality"] = agg

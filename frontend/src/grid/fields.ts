@@ -1,20 +1,30 @@
-// Field catalog for the product grid (DM-02). Everything except the hierarchy keys comes from metadata.
+// Field catalog for the product grid (DM-02, GOV-03). Everything except the hierarchy keys comes from metadata.
+// Computed columns: completeness:<channel>, readiness:<channel>, quality:overall and quality:<channel>.
 
 import type { AttributeDefinition, AttributeGroup, Channel, Level, ProductRow } from "../api/types";
 
-export type FieldKind = "core" | "attr" | "completeness" | "readiness";
+export type FieldKind = "core" | "attr" | "completeness" | "readiness" | "quality";
 
 export interface FieldDef {
-  key: string; // query field: core name, attr:<code>, completeness:<ch>, readiness:<ch>
+  key: string; // query field: core name, attr:<code>, completeness:<ch>, readiness:<ch>, quality:overall, quality:<ch>
   label: string;
   kind: FieldKind;
   groupCode: string;
   groupLabel: string;
   groupOrder: number;
   attr?: AttributeDefinition;
-  channelCode?: string;
+  channelCode?: string; // for quality: "" means the overall score (the row map key is "")
   width: number;
   sortable: boolean;
+}
+
+export const QUALITY_GRADES = ["A", "B", "C", "D", "E"] as const;
+
+/** Reads a row's quality cell for a quality:* field (GOV-03). */
+export function qualityOf(row: ProductRow, field: FieldDef) {
+  // The overall grade is keyed "overall" by the API (and "" on older rows); channel grades by channel code.
+  if (!field.channelCode) return row.quality?.["overall"] ?? row.quality?.[""];
+  return row.quality?.[field.channelCode];
 }
 
 export const LEVEL_RANK: Record<Level, number> = { style: 0, style_color: 1, sku: 2 };
@@ -57,6 +67,17 @@ export function buildFieldCatalog(
     if (c.minLevel && LEVEL_RANK[c.minLevel] > LEVEL_RANK[level]) continue;
     out.push({ key: c.key, label: c.label, kind: "core", groupCode: "__core", groupLabel: "Core fields", groupOrder: -2, width: c.width, sortable: true });
   }
+  out.push({
+    key: "quality:overall",
+    label: "Quality grade",
+    kind: "quality",
+    groupCode: "__channels",
+    groupLabel: "Channels",
+    groupOrder: -1,
+    channelCode: "",
+    width: 90,
+    sortable: true,
+  });
   for (const ch of channels) {
     out.push({
       key: `completeness:${ch.code}`,
@@ -78,6 +99,17 @@ export function buildFieldCatalog(
       groupOrder: -1,
       channelCode: ch.code,
       width: 110,
+      sortable: true,
+    });
+    out.push({
+      key: `quality:${ch.code}`,
+      label: `${ch.label} quality`,
+      kind: "quality",
+      groupCode: "__channels",
+      groupLabel: "Channels",
+      groupOrder: -1,
+      channelCode: ch.code,
+      width: 90,
       sortable: true,
     });
   }
@@ -109,6 +141,7 @@ export function defaultColumns(level: Level, channels: Channel[]): string[] {
   const cols = CORE_FIELDS.filter((c) => !c.minLevel || LEVEL_RANK[c.minLevel] <= LEVEL_RANK[level])
     .filter((c) => c.key !== "entity_type" && c.key !== "brand_scopes")
     .map((c) => c.key);
+  cols.push("quality:overall");
   for (const ch of channels.filter((c) => c.enabled)) {
     cols.push(`completeness:${ch.code}`);
     cols.push(`readiness:${ch.code}`);

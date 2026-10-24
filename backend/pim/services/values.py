@@ -460,6 +460,7 @@ def decide_drafts(session: Session, meta: Metadata, user: CurrentUser, draft_ids
         d.decided_by, d.decided_at, d.comment = user.email, utcnow(), comment
         if decision == "reject":
             d.state = "rejected"
+            _sync_ai_outputs(session, d, user, comment)
             out.append(WriteOutcome(d.attribute_code, "rejected", "Draft rejected"))
             continue
         entity = session.get(ProductEntity, d.entity_id)
@@ -468,8 +469,29 @@ def decide_drafts(session: Session, meta: Metadata, user: CurrentUser, draft_ids
                         source_type=d.source_type, source_ref=f"draft:{d.id}", change_set=cs,
                         ai_generated=d.ai_generated, force=True, approval_state="approved")
         d.state = "approved" if res.outcome in ("approved", "unchanged") else "rejected"
+        _sync_ai_outputs(session, d, user, comment)
         out.append(res)
     return out
+
+
+def _sync_ai_outputs(session: Session, d: ValueDraft, user: CurrentUser, comment: str | None) -> None:
+    """AI-03 / AI-07: a decision on an AI draft, wherever it is taken, is recorded on its AiOutput too."""
+    if not d.ai_generated:
+        return
+    from pim.models import AiOutput
+
+    for o in session.execute(select(AiOutput).where(AiOutput.draft_id == d.id, AiOutput.status.in_(["proposed", "edited"]))).scalars():
+        if d.state == "approved":
+            final = d.proposed.get("value")
+            o.final_value = {"value": final}
+            if o.edit_distance is None:
+                from pim.ai.tasks import edit_distance
+
+                o.edit_distance = edit_distance((o.proposed_value or {}).get("value"), final)
+            o.status = "edited" if o.edit_distance else "accepted"
+        else:
+            o.status, o.rejection_reason = "rejected", (comment or "rejected in approvals")[:500]
+        o.decided_by, o.decided_at = user.email, utcnow()
 
 
 def to_json_safe(v: Any) -> Any:

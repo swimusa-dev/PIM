@@ -1,4 +1,5 @@
-// App shell: left nav, top bar with signed-in email and notification bell (DM-09), ERP staleness banner (IMP-09).
+// App shell: left nav (Phase 4 adds AI, AI-04), top bar with signed-in email and notification bell (DM-09), ERP
+// staleness banner (IMP-09).
 
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useHealth, useMe } from "../api/hooks";
@@ -16,6 +17,7 @@ const NAV: { to: string; label: string; end?: boolean; sub?: boolean }[] = [
   { to: "/exports", label: "Exports" },
   { to: "/packages", label: "Packages" },
   { to: "/images", label: "Images" },
+  { to: "/ai", label: "AI" },
   { to: "/reference", label: "Reference data" },
   { to: "/admin", label: "Admin", end: true },
   { to: "/admin/rules", label: "Rules", sub: true },

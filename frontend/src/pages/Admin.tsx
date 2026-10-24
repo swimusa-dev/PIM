@@ -1,5 +1,6 @@
-// 1.3 metadata layer, RBAC-02, IMP-11, GOV-01, GOV-04, GOV-07: Admin with sub-tabs for attributes, groups,
-// option lists, families, channels, user roles, rules, ERP defects, attribute usage, and telemetry.
+// 1.3 metadata layer, RBAC-02, IMP-11, GOV-01, GOV-03, GOV-04, GOV-07, AI-02: Admin with sub-tabs for attributes,
+// groups, option lists, families, channels, user roles, rules, AI (brand voice and prompt templates), quality,
+// ERP defects, attribute usage, and telemetry.
 
 import { useNavigate, useParams } from "react-router-dom";
 import { Tabs } from "../components/Common";
@@ -11,6 +12,8 @@ import { UserRolesTab } from "../admin/UserRoles";
 import { ErpDefectsTab, AttributeUsageTab } from "../admin/Reports";
 import { TelemetryTab } from "../admin/Telemetry";
 import { RulesTab } from "../admin/Rules";
+import { AiAdminTab } from "../admin/AiAdmin";
+import { QualityTab } from "../admin/Quality";
 
 const TABS = [
   { key: "attributes", label: "Attributes" },
@@ -20,6 +23,8 @@ const TABS = [
   { key: "channels", label: "Channels" },
   { key: "user-roles", label: "User roles" },
   { key: "rules", label: "Rules" },
+  { key: "ai", label: "AI" },
+  { key: "quality", label: "Quality" },
   { key: "erp-defects", label: "ERP defects" },
   { key: "attribute-usage", label: "Attribute usage" },
   { key: "telemetry", label: "Telemetry" },
@@ -44,6 +49,8 @@ export function AdminPage() {
       {active === "channels" && <ChannelsTab />}
       {active === "user-roles" && <UserRolesTab />}
       {active === "rules" && <RulesTab />}
+      {active === "ai" && <AiAdminTab />}
+      {active === "quality" && <QualityTab />}
       {active === "erp-defects" && <ErpDefectsTab />}
       {active === "attribute-usage" && <AttributeUsageTab />}
       {active === "telemetry" && <TelemetryTab />}

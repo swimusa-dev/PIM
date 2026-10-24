@@ -174,3 +174,88 @@ class AssetPatchBody(BaseModel):
 class RenditionRefreshBody(BaseModel):
     channel_code: str
     entity_ids: list[str] | None = None
+
+
+# ---- Phase 4 (AI-02, AI-03, AI-04, AI-07, GOV-03) ----
+class BrandVoiceBody(BaseModel):
+    label: str | None = None
+    tone: str = ""
+    do_rules: list[str] = []
+    dont_rules: list[str] = []
+    blocked_terms: list[str] = []
+    trademark_terms: dict[str, str] = {}
+    punctuation_rules: list[str] = []
+    examples: list[str] = []
+
+
+class TemplateBody(BaseModel):
+    code: str | None = None
+    label: str
+    task_type: str
+    target_attribute: str | None = None
+    output_attributes: list[str] = []
+    channel_code: str | None = None
+    family_code: str | None = None
+    brand_code: str = "vitamin_a"
+    body: str
+    input_attributes: list[str] = []
+    input_shot_types: list[str] = []
+    accepts_text_input: bool = False
+    accepts_document: bool = False
+    max_length: int | None = None
+    model_task: str = "copy"
+    status: str | None = None
+    note: str | None = None
+
+
+class TemplatePreviewBody(BaseModel):
+    entity_id: str
+    channel_code: str | None = None
+    text: str | None = None
+
+
+class AskBody(BaseModel):
+    entity_id: str
+    template_code: str
+    channel_code: str | None = None
+    text: str | None = None
+    document: dict | None = None
+    image_asset_ids: list[str] | None = None
+
+
+class AcceptBody(BaseModel):
+    value: object | None = None
+
+
+class RejectBody(BaseModel):
+    reason: str
+
+
+class RegenerateBody(BaseModel):
+    note: str | None = None
+
+
+class AiRunBody(BaseModel):
+    template_code: str
+    selection: dict = {}
+    channel_code: str | None = None
+
+
+class EvalBuildBody(BaseModel):
+    attribute_code: str
+    limit: int = 50
+
+
+class EvalRunBody(BaseModel):
+    template_code: str
+
+
+class QualitySettingsBody(BaseModel):
+    excluded_groups: list[str] = []
+    enabled_checks: list[str] = []
+    weights: dict[str, float] = {}
+    grade_bands: dict[str, float] = {}
+
+
+class RecomputeBody(BaseModel):
+    entity_ids: list[str] | None = None

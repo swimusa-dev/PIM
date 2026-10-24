@@ -1,6 +1,7 @@
-// DM-05, DM-01, DM-06, DM-11: Attribute groups as collapsible sections, editors by data_type,
+// DM-05, DM-01, DM-06, DM-11, AI-06: Attribute groups as collapsible sections, editors by data_type,
 // inherited values read-only with "Edit at <level>" link, reference entity links, and a two-column
-// global vs channel compare with "Copy to channel" for channel-scopable attributes.
+// global vs channel compare with "Copy to channel" for channel-scopable attributes. Each row carries
+// id="attr-<code>" so the Ask AI panel can focus an attribute that the model needs filled (AI-06).
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -173,7 +174,7 @@ function AttributeRow({
   const channelEditable = baseEditable && !(chCell?.read_only && chCell.read_only_reason !== "inherited");
 
   return (
-    <div className={`attr-row${compare ? " compare" : ""}${missing ? " missing" : ""}`}>
+    <div id={`attr-${attr.code}`} className={`attr-row${compare ? " compare" : ""}${missing ? " missing" : ""}`}>
       <div className="attr-label">
         {attr.label}
         {attr.unit && <span className="faint"> ({attr.unit})</span>}

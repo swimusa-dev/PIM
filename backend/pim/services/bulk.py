@@ -4,7 +4,6 @@ failed records with reasons, and keep the whole action as one reversible change 
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -208,34 +207,37 @@ def run(session: Session, meta: Metadata, user: CurrentUser, action: BulkAction)
 
 
 def _run_ai_for(session: Session, meta: Metadata, user: CurrentUser, ent: ProductEntity, params: dict) -> tuple[str, str | None]:
-    """AI-04 bulk AI: output lands as a proposed draft (AI-03); never a direct write."""
+    """AI-04 bulk AI through a managed template (AI-02); output lands as a proposed draft (AI-03), never a write.
+    The Exports-era `target_attribute` parameter picks the first active template for that attribute."""
     from pim.adapters.base import NotConfigured
-    from pim.ai.service import DEFAULT_VITAMIN_A_VOICE, AIService, PromptTemplate
-    from pim.services.values import resolve_cells
+    from pim.ai import tasks
+    from pim.models import PromptTemplate
 
-    target = meta.attributes.get(params.get("target_attribute", ""))
-    if target is None:
-        return "failed", "Unknown target attribute"
     if not user.can("run_ai"):
         return "failed", "No run_ai permission"
-    codes = [a.code for a in meta.attributes_for_family(ent.family_code) if a.level in ("style", "style_color") and a.code != target.code][:30]
-    cells = resolve_cells(session, meta, user, [ent], codes, include_drafts=False).get(ent.id, {})
-    attrs: dict[str, Any] = {c: (v.get("display") or v.get("value")) for c, v in cells.items() if v.get("value") is not None}
-    tpl = PromptTemplate(code=params.get("template_code", f"bulk_{params.get('task_type', 'generate')}"), version="1",
-                         task_type=params.get("task_type", "generate"), target_attribute=target.code,
-                         body=f"Write the {target.label} for this product using only the supplied facts.", max_length=(target.validation or {}).get("max_length"))
+    tpl = session.get(PromptTemplate, params.get("template_code", "")) if params.get("template_code") else None
+    if tpl is None and params.get("target_attribute"):
+        tpl = next(iter(tasks.templates_for(session, meta, ent, params["target_attribute"])), None)
+    if tpl is None:
+        return "failed", "No active template for this attribute; create one under Admin > AI"
     try:
-        res = AIService().run(tpl, DEFAULT_VITAMIN_A_VOICE, attrs, product_id=ent.id, user_email=user.email)
+        outs = tasks.run_task(session, meta, user, ent, tpl, channel_code=params.get("channel_code") or "")
     except NotConfigured as exc:
         return "skipped", str(exc)
-    except Exception as exc:  # noqa: BLE001
-        return "failed", f"AI call failed: {str(exc)[:200]}"
-    if not res.ok:
-        return "failed", "; ".join(res.needs_input and [f"needs input: {', '.join(res.needs_input)}"] or res.grounding_errors)
-    session.add(ValueDraft(entity_level=ent.level, entity_id=ent.id, attribute_code=target.code, channel_code=params.get("channel_code") or "",
-                           proposed={"value": res.text, "not_applicable": False}, source_type="ai", ai_generated=True,
-                           submitted_by=user.email, state="proposed"))
-    return "changed", "AI suggestion queued for approval"
+    except tasks.AiTaskError as exc:
+        return "failed", str(exc)
+    if any(o.status == "proposed" for o in outs):
+        return "changed", "AI suggestion queued for approval"
+    first = outs[0] if outs else None
+    if first is None:
+        return "failed", "no output"
+    if first.status == "info":
+        findings = first.check_findings or []
+        return "skipped", (f"{len(findings)} finding(s): " + "; ".join(f.get("message", "") for f in findings[:3])) if findings else "; ".join(first.grounding_errors or ["nothing to apply"])
+    parts = list(first.grounding_errors or [])
+    if first.needs_input:
+        parts.append(f"needs input: {', '.join(first.needs_input)}")
+    return "failed", "; ".join(parts) or first.status
 
 
 def rollback(session: Session, meta: Metadata, user: CurrentUser, action: BulkAction) -> dict:

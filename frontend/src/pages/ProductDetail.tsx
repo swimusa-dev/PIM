@@ -1,13 +1,14 @@
-// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, EXP-03, EXP-12: Product detail page. Header with
-// identifiers, hierarchy tree, completeness per channel with "show only missing required", attribute groups,
-// channel override compare, images panel, history tab, comments tab, workflow panel, carryover, compare link,
-// eligibility reasons and overrides per channel.
+// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, GOV-03, EXP-03, EXP-12, AI-03, AI-05, AI-06:
+// Product detail page. Header with identifiers, hierarchy tree, completeness per channel with "show only missing
+// required", attribute groups, channel override compare, images panel, history tab, comments tab, Ask AI tab
+// (hidden without run_ai), workflow panel, carryover, compare link, eligibility reasons and overrides per channel,
+// and the quality score checks per channel.
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { useChannels, useOptionLists } from "../api/hooks";
+import { canRunAi, useChannels, useMe, useOptionLists } from "../api/hooks";
 import type { OptionList } from "../api/types";
 import { Badge, ErrorBox, LifecycleBadge, PercentPill, ReadinessPill, Spinner, Tabs } from "../components/Common";
 import { TreePanel } from "../detail/TreePanel";
@@ -18,15 +19,20 @@ import { CommentsTab } from "../detail/CommentsTab";
 import { WorkflowPanel } from "../detail/WorkflowPanel";
 import { CarryoverDialog } from "../detail/CarryoverDialog";
 import { EligibilityPanel } from "../detail/EligibilityPanel";
+import { AskAiPanel } from "../detail/AskAiPanel";
+import { QualityPanel } from "../detail/QualityPanel";
 import { LEVEL_LABEL } from "../lib/format";
 
-type Tab = "attributes" | "images" | "history" | "comments";
+type Tab = "attributes" | "images" | "history" | "comments" | "ai";
 
 export function ProductDetailPage() {
   const { id = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const channels = useChannels();
   const optionLists = useOptionLists();
+  const me = useMe();
   const [tab, setTab] = useState<Tab>("attributes");
+  const [focusAttr, setFocusAttr] = useState<string | null>(searchParams.get("attr"));
   const [missingChannel, setMissingChannel] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [compareChannel, setCompareChannel] = useState("");
@@ -63,6 +69,24 @@ export function ProductDetailPage() {
 
   const allAttributes = useMemo(() => (detail.data?.groups ?? []).flatMap((g) => g.attributes), [detail.data]);
   const hasScopable = allAttributes.some((a) => a.channel_scopable);
+  const showAi = canRunAi(me.data);
+
+  // AI-06: NEEDS_INPUT chips (and ?attr= links from the AI pages) switch to the form and scroll to the attribute row.
+  const goToAttribute = useCallback((code: string) => {
+    setTab("attributes");
+    setOnlyMissing(false);
+    setFocusAttr(code);
+  }, []);
+  useEffect(() => {
+    if (!focusAttr || tab !== "attributes" || !detail.data) return;
+    const el = document.getElementById(`attr-${focusAttr}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("flash");
+      window.setTimeout(() => el.classList.remove("flash"), 2000);
+    }
+    setFocusAttr(null);
+  }, [focusAttr, tab, detail.data]);
 
   if (detail.isLoading) return <Spinner label="Loading product" />;
   if (detail.isError) return <ErrorBox error={detail.error} title="Could not load the product" />;
@@ -181,6 +205,7 @@ export function ProductDetailPage() {
               { key: "images", label: "Images", count: detail.data!.images.length },
               { key: "history", label: "History", count: detail.data!.history_count },
               { key: "comments", label: "Comments" },
+              ...(showAi ? [{ key: "ai" as Tab, label: "Ask AI" }] : []),
             ]}
           />
           {tab === "attributes" && (
@@ -213,6 +238,9 @@ export function ProductDetailPage() {
           {tab === "images" && <ImagesPanel entityId={entity.entity_id} />}
           {tab === "history" && <HistoryTab entityId={entity.entity_id} attributes={allAttributes} optionLists={listByCode} />}
           {tab === "comments" && <CommentsTab entityId={entity.entity_id} attributes={allAttributes} />}
+          {tab === "ai" && showAi && (
+            <AskAiPanel entityId={entity.entity_id} attributes={allAttributes} optionLists={listByCode} onGoToAttribute={goToAttribute} />
+          )}
         </div>
 
         <div className="detail-right stack">
@@ -287,6 +315,10 @@ export function ProductDetailPage() {
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
                 <div className="muted small mb8">Eligibility (EXP-12)</div>
                 <EligibilityPanel entityId={entity.entity_id} channelLabel={channelLabel} />
+              </div>
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                <div className="muted small mb8">Quality (GOV-03)</div>
+                <QualityPanel entityId={entity.entity_id} channelLabel={channelLabel} />
               </div>
             </div>
           </div>

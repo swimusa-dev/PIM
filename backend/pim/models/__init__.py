@@ -1,5 +1,16 @@
 """ORM models. Tables live in Lakebase native (read/write) schema `pim` (ARC-02)."""
 
+from pim.models.ai import (  # noqa: F401
+    AiEvalCase,
+    AiEvalRun,
+    AiOutput,
+    AiRun,
+    BrandVoice,
+    PromptTemplate,
+    PromptTemplateVersion,
+    QualitySettings,
+    QualitySnapshot,
+)
 from pim.models.collab import Comment, Notification  # noqa: F401
 from pim.models.exports import EligibilityOverride, ImageRendition, PublishItem  # noqa: F401
 from pim.models.imports import (  # noqa: F401

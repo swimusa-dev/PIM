@@ -247,3 +247,71 @@ resources:
       parameters:
         - {name: job_run_id, default: ""}
       max_concurrent_runs: 1
+
+    pim_ai_bulk:
+      name: "[PIM] Bulk AI run (AI-04)"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: ai_bulk
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_ai_bulk.py
+            parameters: ["--run-id", "{{job.parameters.run_id}}", "--user", "{{job.parameters.user}}",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: run_id, default: ""}
+        - {name: user, default: "system"}
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 3
+
+    pim_ai_eval:
+      name: "[PIM] AI evaluation set (AI-07)"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: ai_eval
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_ai_eval.py
+            parameters: ["--template-code", "{{job.parameters.template_code}}", "--user", "{{job.parameters.user}}",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: template_code, default: ""}
+        - {name: user, default: "system"}
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
+    pim_quality_score:
+      name: "[PIM] Data quality score (GOV-03)"
+      schedule:
+        quartz_cron_expression: "0 20 3 * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: quality
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_quality.py
+            parameters: *conn
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1

@@ -65,6 +65,15 @@ candidates behind a flag (IMG-03), image ordering and technical rule checks (IMG
 (IMG-06) and per-channel renditions (IMG-07). Direct Shopify writes (EXP-07) stay off; a Shopify publish builds
 an EXP-13 package. See `docs/api-contract-phase3.md` and section 8b of the setup guide.
 
+## Phase 4 (AI enrichment and quality)
+
+Phase 4 adds the brand voice and versioned prompt templates as managed configuration (AI-02), the Ask AI panel with
+side-by-side review, accept, edit, regenerate and reject (AI-03), bulk AI runs with a five-product sample preview
+(AI-04), the seven task types generate, adapt, extract, classify, check, restructure and expand (AI-05), grounding
+that fails any invented claim (AI-06), an evaluation set with a regression gate and acceptance metrics (AI-07), and
+the A to E data quality score with configurable checks (GOV-03). Every AI output lands as a suggestion; nothing is
+written to a product without a person. See `docs/api-contract-phase4.md` and section 8c of the setup guide.
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status
