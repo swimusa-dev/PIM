@@ -88,6 +88,7 @@ interface RulePreview { sample: { entity_id: string; label: string; brand_scopes
 | GET | `/api/imports/batches?status=&source=&page=` | `{rows: ImportBatch[], total}` (import history, IMP-07) |
 | POST | `/api/imports/batches` | multipart: `file` (one or more, repeatable), fields `source_code`, `level` (default `style_color`). Parses, stores to the import volume, detects header rows, recognizes keyed worksheets (IMP-12), auto-applies a matching template by structure signature. Returns `ImportBatch` (status `uploaded`, or `mapped` when a template applied) |
 | POST | `/api/imports/batches/{id}/files` | add another file to the batch (mixed sources); body as above |
+| PUT | `/api/imports/batches/{id}/files` | body `{files: [{index, header_row?, group_header_row?, data_start_row?}]}` (1-based rows). Re-parses the stored file with the person's rows and re-stages its rows; refused for keyed worksheets, Shopify pulls, and batches past validation; mapping entries whose source columns disappear are dropped and the template is re-evaluated. Called when leaving the Upload step, before mapping |
 | POST | `/api/imports/batches/{id}/shopify-pull` | IMP-08: build the batch rows from a Shopify snapshot (API) or an uploaded product CSV (`file`) |
 | GET | `/api/imports/batches/{id}` | `ImportBatch` |
 | GET | `/api/imports/batches/{id}/suggest-mapping` | `MappingSuggestion[]` for unmapped columns (IMP-02); never auto-applied |

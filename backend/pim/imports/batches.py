@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from pim.adapters.shopify_admin import ShopifySnapshot
@@ -44,11 +44,8 @@ def add_file(session: Session, meta: Metadata, batch: ImportBatch, filename: str
     added = []
     for pf in parsed:
         idx = len(batch.files or [])
-        entry = pf.as_dict(idx, precedence=idx)
-        entry["path"] = path
+        entry = _stage_file(session, batch, idx, pf, path, precedence=idx)
         batch.files = [*(batch.files or []), entry]
-        for i, raw in enumerate(pf.rows, start=pf.data_start_row):
-            session.add(ImportRow(batch_id=batch.id, file_index=idx, row_number=i, raw=raw, mapped={}))
         added.append(entry)
         if pf.worksheet_meta:
             _apply_worksheet(session, meta, batch, pf)
@@ -60,33 +57,66 @@ def add_file(session: Session, meta: Metadata, batch: ImportBatch, filename: str
     return added
 
 
-def reparse_files(session: Session, batch: ImportBatch, edits: list[dict], storage: Storage) -> None:
-    """Re-parse a staged file with a user-chosen header row (the detector is a guess; the person decides)."""
+def _stage_file(session: Session, batch: ImportBatch, idx: int, pf: ParsedFile, path: str, precedence: int) -> dict:
+    """Store one parsed sheet as rows of the batch and return its file entry."""
+    for i, raw in enumerate(pf.rows, start=pf.data_start_row):
+        session.add(ImportRow(batch_id=batch.id, file_index=idx, row_number=i, raw=raw, mapped={}))
+    entry = pf.as_dict(idx, precedence)
+    entry["path"] = path
+    return entry
+
+
+def reparse_files(session: Session, batch: ImportBatch, edits: list[dict], storage: Storage) -> bool:
+    """Re-parse staged files with person-chosen header, group header, and data start rows (the detector is a guess).
+
+    Called from its own endpoint when the person leaves the Upload step, before any mapping exists against the
+    new column names. Keyed worksheets have a fixed layout and are refused. Returns True when anything changed."""
+    if batch.status not in ("uploaded", "mapped"):
+        raise ValueError("Header rows can only change before validation")
     files = list(batch.files or [])
+    changed = False
     for e in edits:
-        idx = int(e.get("index", -1))
-        if not (0 <= idx < len(files)) or not files[idx].get("path"):
+        idx = int(e["index"])
+        if not (0 <= idx < len(files)):
+            raise ValueError(f"No file at index {idx}")
+        f = files[idx]
+        if f.get("worksheet_meta") or batch.worksheet_id:
+            raise ValueError("A keyed worksheet has a fixed layout; its header rows cannot change")
+        if not f.get("path"):
+            raise ValueError("This file was not uploaded (for example a Shopify pull) and cannot be re-parsed")
+        header = int(e.get("header_row") or f["header_row"])
+        group = e.get("group_header_row", f.get("group_header_row"))
+        group = int(group) if group else None
+        data_start = int(e.get("data_start_row") or 0) or None
+        if header == f["header_row"] and group == f.get("group_header_row") and (data_start is None or data_start == f.get("data_start_row")):
             continue
-        new_header = int(e.get("header_row") or files[idx]["header_row"])
-        if new_header == files[idx]["header_row"] and e.get("group_header_row") == files[idx].get("group_header_row"):
-            continue
-        content = storage.read(files[idx]["path"])
-        parsed = [p for p in parse_upload(files[idx]["name"], content, new_header) if p.sheet == files[idx].get("sheet") or files[idx].get("sheet") is None]
+        content = storage.read(f["path"])
+        try:
+            parsed = parse_upload(f["name"], content, header, group, data_start, only_sheet=f.get("sheet"))
+        except ValueError as exc:
+            raise ValueError(f"{f['name']}: {exc}") from exc
         if not parsed:
-            continue
-        pf = parsed[0]
-        if e.get("group_header_row") is not None:
-            pf.group_header_row = int(e["group_header_row"]) or None
-        for r in session.execute(select(ImportRow).where(ImportRow.batch_id == batch.id, ImportRow.file_index == idx)).scalars():
-            session.delete(r)
-        for i, raw in enumerate(pf.rows, start=pf.data_start_row):
-            session.add(ImportRow(batch_id=batch.id, file_index=idx, row_number=i, raw=raw, mapped={}))
-        entry = pf.as_dict(idx, files[idx].get("precedence", idx))
-        entry["path"] = files[idx]["path"]
-        files[idx] = entry
+            raise ValueError(f"{f['name']}: sheet {f.get('sheet')} not found")
+        session.execute(delete(ImportRow).where(ImportRow.batch_id == batch.id, ImportRow.file_index == idx))
+        files[idx] = _stage_file(session, batch, idx, parsed[0], f["path"], f.get("precedence", idx))
+        changed = True
+    if not changed:
+        return False
     batch.files = files
+    # column names changed: drop mapping entries whose sources no longer exist and re-evaluate the template
+    names = {c["name"] for f in files for c in f.get("columns", [])}
+    kept = [m for m in (batch.mapping or []) if any(s in names for s in (m.get("sources") or []))]
+    if len(kept) != len(batch.mapping or []):
+        batch.mapping = kept
+    if batch.template_id:
+        tpl = session.get(MappingTemplate, batch.template_id)
+        if tpl is None or tpl.structure_signature != files[0].get("signature"):
+            batch.template_id, batch.mapping = None, []
+            batch.status = "uploaded"
+            _auto_apply_template(session, batch)
     session.flush()
     session.expire(batch, ["rows"])
+    return True
 
 
 def _apply_worksheet(session: Session, meta: Metadata, batch: ImportBatch, pf: ParsedFile) -> None:

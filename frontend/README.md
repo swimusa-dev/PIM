@@ -73,7 +73,7 @@ both likely forms or sends an extra optional field:
 
 - `GET /api/bulk`, `GET /api/rules/runs`, `GET /api/products/{id}/workflow` may return a bare array or `{rows, total}`.
 - `GET /api/workflows` rows are `{code, label, enabled, entry_rule, steps[]}`; steps may carry an `id` (used as `to_step_id` on reject, falling back to the position).
-- `PUT /api/imports/batches/{id}/mapping` also sends `files: [{index, header_row, group_header_row, data_start_row}]` for header row edits made on the Upload step.
+- `PUT /api/imports/batches/{id}/mapping` also sends `files: [{index, header_row, group_header_row, data_start_row}]` for header row edits (applied through PUT /api/imports/batches/{id}/files when leaving the Upload step) made on the Upload step.
 - `POST /api/imports/templates` sends the template fields plus `batch_id` so the server can derive the structure signature.
 - Review diff entries for `creates`, `adds` and `skipped` are rendered from whatever keys they carry.
 - `GET /api/notifications` without `unread` is expected to return recent rows plus the `unread` count.

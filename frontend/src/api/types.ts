@@ -742,8 +742,14 @@ export interface MappingUpdate {
   options: ImportBatchOptions;
   template_id?: string | null;
   precedence?: number[];
-  // Assumption beyond the contract: header row edits made on the Upload step travel with the mapping.
-  files?: { index: number; header_row: number; group_header_row?: number | null; data_start_row: number }[];
+}
+
+/** Header-row edits from the Upload step, applied through PUT /api/imports/batches/{id}/files before mapping. */
+export interface FileEdit {
+  index: number;
+  header_row: number;
+  group_header_row?: number | null;
+  data_start_row?: number;
 }
 
 export interface ImportRollbackResult {

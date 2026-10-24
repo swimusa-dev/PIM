@@ -278,3 +278,94 @@ def test_imp06_group_policy_override(meta, policy, expected):
     finally:
         attr.survivorship = None
     assert policy_for(meta, meta.attributes["erp_style_content"]) == "never_from_import"
+
+
+# ---- header-row edits (IMP-01, review fixes) ----------------------------------------------------------------------
+NOTES_CSV = b"""Vendor price list Q4
+Style,Color,Weight
+(number),(code),(lb)
+200809,FVP,0.16
+200810,ECB,0.12
+"""
+
+
+def test_reparse_files_applies_header_group_and_data_start(session, meta, admin, tmp_path):
+    from pim.imports.batches import reparse_files
+
+    storage = Storage(str(tmp_path))
+    batch = create_batch(session, admin, "supplier", "style_color")
+    add_file(session, meta, batch, "notes.csv", NOTES_CSV, storage)
+    f = batch.files[0]
+    assert f["header_row"] == 2 and f["rows"] == 3  # the units row is staged as data until the person says otherwise
+    assert reparse_files(session, batch, [{"index": 0, "header_row": 2, "data_start_row": 4}], storage) is True
+    assert batch.files[0]["data_start_row"] == 4 and batch.files[0]["rows"] == 2
+    assert [r.raw["Style"] for r in batch.rows] == ["200809", "200810"]
+    # a no-op edit changes nothing
+    assert reparse_files(session, batch, [{"index": 0, "header_row": 2, "data_start_row": 4}], storage) is False
+    # a title row chosen as group header is preserved on the columns
+    assert reparse_files(session, batch, [{"index": 0, "header_row": 2, "group_header_row": 1, "data_start_row": 4}], storage) is True
+    assert batch.files[0]["group_header_row"] == 1 and batch.files[0]["columns"][0]["group"] == "Vendor price list Q4"
+
+
+def test_reparse_files_rejects_bad_rows_worksheets_and_late_edits(session, meta, admin, ingested, tmp_path):
+    import pytest as _pytest
+
+    from pim.imports.batches import reparse_files
+
+    storage = Storage(str(tmp_path))
+    batch = create_batch(session, admin, "supplier", "style_color")
+    add_file(session, meta, batch, "notes.csv", NOTES_CSV, storage)
+    with _pytest.raises(ValueError):
+        reparse_files(session, batch, [{"index": 0, "header_row": 500}], storage)
+    with _pytest.raises(ValueError):
+        reparse_files(session, batch, [{"index": 0, "header_row": 2, "group_header_row": 3}], storage)
+    with _pytest.raises(ValueError):
+        reparse_files(session, batch, [{"index": 7, "header_row": 2}], storage)
+    assert batch.files[0]["rows"] == 3  # nothing was wiped by the refused edits
+    # keyed worksheets have a fixed layout
+    ents = session.execute(select(ProductEntity).where(ProductEntity.level == "style_color", ProductEntity.style_number == "200809")).scalars().all()
+    ws, data = build_worksheet(session, meta, admin, ents, "style_color", ["style_details"], True, {})
+    session.flush()
+    wb_batch = create_batch(session, admin, "worksheet", "style_color")
+    add_file(session, meta, wb_batch, ws.file_name, data, storage)
+    with _pytest.raises(ValueError):
+        reparse_files(session, wb_batch, [{"index": 0, "header_row": 3}], storage)
+    # after validation the layout is frozen
+    set_mapping(session, meta, batch, [{"target": "style_number", "sources": ["Style"], "transforms": []}], ["style"], {}, None, None)
+    validate_batch(session, meta, batch)
+    with _pytest.raises(ValueError):
+        reparse_files(session, batch, [{"index": 0, "header_row": 2, "data_start_row": 4}], storage)
+
+
+def test_reparse_drops_dead_mapping_sources_and_reevaluates_template(session, meta, admin, tmp_path):
+    from pim.imports.batches import reparse_files
+
+    storage = Storage(str(tmp_path))
+    batch = create_batch(session, admin, "supplier", "style_color")
+    add_file(session, meta, batch, "notes.csv", NOTES_CSV, storage)
+    set_mapping(session, meta, batch, [{"target": "style_number", "sources": ["Style"], "transforms": []}], ["style"], {}, None, None)
+    tpl = save_template(session, batch, "notes layout", admin)
+    session.flush()
+    # choosing the title row as the header renames every column, so the mapping and the template no longer apply
+    reparse_files(session, batch, [{"index": 0, "header_row": 1, "data_start_row": 2}], storage)
+    assert batch.mapping == [] and batch.template_id is None and batch.status == "uploaded"
+    assert batch.files[0]["signature"] != tpl.structure_signature
+
+
+def test_files_endpoint_validates_and_returns_batch(session, ingested):
+    from fastapi.testclient import TestClient
+
+    from pim.main import app
+    from pim.models import UserRole
+
+    if not session.execute(select(UserRole).where(UserRole.email == "admin@swimusa.com")).first():
+        session.add(UserRole(email="admin@swimusa.com", role_code="pim_admin", brand_scopes=[]))
+    session.commit()
+    client = TestClient(app)
+    H = {"X-Forwarded-Email": "admin@swimusa.com"}
+    b = client.post("/api/imports/batches", files=[("file", ("notes.csv", NOTES_CSV, "text/csv"))], data={"source_code": "supplier"}, headers=H).json()
+    assert client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": -2}]}, headers=H).status_code == 422
+    assert client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": "two"}]}, headers=H).status_code == 422
+    assert client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": 99}]}, headers=H).status_code == 400
+    ok = client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": 2, "data_start_row": 4}]}, headers=H).json()
+    assert ok["files"][0]["rows"] == 2 and ok["files"][0]["data_start_row"] == 4

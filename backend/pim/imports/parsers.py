@@ -102,11 +102,21 @@ def _looks_numeric(s: str) -> bool:
 
 
 def _build(name: str, sheet: str | None, grid: list[list[str]], header_row: int | None = None,
-           group_row: int | None = None, worksheet_meta: dict | None = None, hidden: list[str] | None = None) -> ParsedFile:
+           group_row: int | None = None, worksheet_meta: dict | None = None, hidden: list[str] | None = None,
+           data_start: int | None = None) -> ParsedFile:
+    """Indexes are 0-based. When header_row is given, group_row is used as given (None means no group row) and
+    data_start defaults to the row after the header."""
     if header_row is None:
         h, g = detect_header(grid)
     else:
         h, g = header_row, group_row
+    if not grid or h < 0 or h >= len(grid):
+        raise ValueError(f"Header row {h + 1} is outside the file ({len(grid)} rows)")
+    if g is not None and (g < 0 or g >= h):
+        raise ValueError("The group header row must be above the header row")
+    first_data = h + 1 if data_start is None else data_start
+    if first_data <= h:
+        raise ValueError("Data must start below the header row")
     headers_raw = grid[h] if h < len(grid) else []
     width = max((len(r) for r in grid), default=0)
     headers: list[str] = []
@@ -129,7 +139,7 @@ def _build(name: str, sheet: str | None, grid: list[list[str]], header_row: int 
                 last = val
             groups[i] = last
     rows: list[dict[str, str]] = []
-    for r in grid[h + 1:]:
+    for r in grid[first_data:]:
         if not any(c for c in r):
             continue
         rows.append({headers[i]: (r[i] if i < len(r) else "") for i in range(width)})
@@ -138,16 +148,22 @@ def _build(name: str, sheet: str | None, grid: list[list[str]], header_row: int 
         samples = [row[hname] for row in rows if row.get(hname)][:3]
         columns.append(ColumnInfo(name=hname, group=groups[i], samples=samples, index=i))
     return ParsedFile(name=name, sheet=sheet, header_row=h + 1, group_header_row=(g + 1) if g is not None else None,
-                      data_start_row=h + 2, columns=columns, rows=rows, worksheet_meta=worksheet_meta, hidden_columns=hidden or [])
+                      data_start_row=first_data + 1, columns=columns, rows=rows, worksheet_meta=worksheet_meta, hidden_columns=hidden or [])
 
 
-def parse_csv(name: str, content: bytes, header_row: int | None = None) -> ParsedFile:
+def _idx(v: int | None) -> int | None:
+    return None if v is None else v - 1
+
+
+def parse_csv(name: str, content: bytes, header_row: int | None = None, group_header_row: int | None = None,
+              data_start_row: int | None = None) -> ParsedFile:
     text = content.decode("utf-8-sig", errors="replace")
     grid = [[_cell_str(c) for c in row] for row in csv.reader(io.StringIO(text))]
-    return _build(name, None, grid, None if header_row is None else header_row - 1)
+    return _build(name, None, grid, _idx(header_row), _idx(group_header_row), data_start=_idx(data_start_row))
 
 
-def parse_xlsx(name: str, content: bytes, header_row: int | None = None) -> list[ParsedFile]:
+def parse_xlsx(name: str, content: bytes, header_row: int | None = None, group_header_row: int | None = None,
+               data_start_row: int | None = None, only_sheet: str | None = None) -> list[ParsedFile]:
     wb = load_workbook(io.BytesIO(content), data_only=True, read_only=False)
     meta = read_worksheet_meta(wb)
     out: list[ParsedFile] = []
@@ -156,16 +172,18 @@ def parse_xlsx(name: str, content: bytes, header_row: int | None = None) -> list
             continue
         if meta is not None and ws.title.lower() == "instructions":
             continue
+        if only_sheet is not None and ws.title != only_sheet:
+            continue
         grid = [[_cell_str(c) for c in row] for row in ws.iter_rows(values_only=True)]
         if not any(any(c for c in r) for r in grid):
             continue
         hidden = [k for k, dim in ws.column_dimensions.items() if dim.hidden]
-        hr, gr = (None, None)
+        hr, gr, ds = (None, None, None)
         if meta is not None:
             hr, gr = int(meta.get("header_row", 2)) - 1, int(meta.get("group_header_row", 1)) - 1
         elif header_row is not None:
-            hr = header_row - 1
-        out.append(_build(name, ws.title, grid, hr, gr, meta, hidden))
+            hr, gr, ds = _idx(header_row), _idx(group_header_row), _idx(data_start_row)
+        out.append(_build(name, ws.title, grid, hr, gr, meta, hidden, data_start=ds))
         if meta is not None:
             break  # a keyed worksheet has one data sheet
     return out
@@ -182,10 +200,12 @@ def read_worksheet_meta(wb) -> dict | None:  # noqa: ANN001
     return meta if meta.get("worksheet_id") else None
 
 
-def parse_upload(filename: str, content: bytes, header_row: int | None = None) -> list[ParsedFile]:
+def parse_upload(filename: str, content: bytes, header_row: int | None = None, group_header_row: int | None = None,
+                 data_start_row: int | None = None, only_sheet: str | None = None) -> list[ParsedFile]:
+    """Rows are 1-based as a person reads them in Excel. With header_row given, detection is skipped."""
     lower = filename.lower()
     if lower.endswith(".csv") or lower.endswith(".txt"):
-        return [parse_csv(filename, content, header_row)]
+        return [parse_csv(filename, content, header_row, group_header_row, data_start_row)]
     if lower.endswith(".xlsx") or lower.endswith(".xlsm"):
-        return parse_xlsx(filename, content, header_row)
+        return parse_xlsx(filename, content, header_row, group_header_row, data_start_row, only_sheet)
     raise ValueError("Unsupported file type; upload CSV or XLSX")

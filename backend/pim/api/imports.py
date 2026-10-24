@@ -7,7 +7,7 @@ import os
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from pim.adapters.base import NotConfigured
@@ -94,7 +94,17 @@ class MappingBody(BaseModel):
     options: dict = {}
     template_id: str | None = None
     precedence: list[int] | None = None
-    files: list[dict] | None = None  # header-row edits from the Upload step: [{index, header_row, group_header_row}]
+
+
+class FileEdit(BaseModel):
+    index: int = Field(ge=0)
+    header_row: int | None = Field(default=None, ge=1)
+    group_header_row: int | None = Field(default=None, ge=1)
+    data_start_row: int | None = Field(default=None, ge=2)
+
+
+class FileEditsBody(BaseModel):
+    files: list[FileEdit]
 
 
 class ValueMappingsBody(BaseModel):
@@ -230,6 +240,20 @@ async def add_file_endpoint(batch_id: str, file: list[UploadFile] = File(default
     return batch_out(batch)
 
 
+@router.put("/imports/batches/{batch_id}/files")
+def edit_files(batch_id: str, body: FileEditsBody, session: Session = Depends(get_session),
+               user: CurrentUser = Depends(require_permission("import"))) -> dict:
+    """IMP-01: apply the person's header, group header, and data start rows and re-stage the rows."""
+    batch = _batch_or_404(session, batch_id)
+    try:
+        reparse_files(session, batch, [e.model_dump() for e in body.files], _storage())
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    session.commit()
+    return batch_out(batch)
+
+
 @router.post("/imports/batches/{batch_id}/shopify-pull")
 async def shopify_pull(batch_id: str, file: UploadFile | None = None, session: Session = Depends(get_session),
                        user: CurrentUser = Depends(require_permission("import"))) -> dict:
@@ -264,8 +288,6 @@ def suggest(batch_id: str, session: Session = Depends(get_session), meta: Metada
 def put_mapping(batch_id: str, body: MappingBody, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
                 user: CurrentUser = Depends(require_permission("import"))) -> dict:
     batch = _batch_or_404(session, batch_id)
-    if body.files:
-        reparse_files(session, batch, body.files, _storage())
     if body.template_id:
         tpl = session.get(MappingTemplate, body.template_id)
         if tpl is None:

@@ -49,6 +49,7 @@ import type {
   MappingSuggestion,
   MappingTemplate,
   MappingUpdate,
+  FileEdit,
   MatchStatus,
   NotificationList,
   Rule,
@@ -288,6 +289,7 @@ export const api = {
     batch: (id: string) => get<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}`),
     suggestMapping: (id: string) => get<MappingSuggestion[]>(`/api/imports/batches/${encodeURIComponent(id)}/suggest-mapping`),
     saveMapping: (id: string, body: MappingUpdate) => put<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/mapping`, body),
+    editFiles: (id: string, files: FileEdit[]) => put<ImportBatch>(`/api/imports/batches/${encodeURIComponent(id)}/files`, { files }),
     valueMappings: (id: string) => get<ValueMappings>(`/api/imports/batches/${encodeURIComponent(id)}/value-mappings`),
     saveValueMappings: (id: string, items: { list_code: string; raw: string; option_code: string | null }[]) =>
       put<ValueMappings | void>(`/api/imports/batches/${encodeURIComponent(id)}/value-mappings`, { items }),

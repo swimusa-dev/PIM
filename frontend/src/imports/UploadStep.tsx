@@ -64,6 +64,24 @@ export function UploadStep({
 }) {
   const sources = useImportSources();
   const toast = useToast();
+  // IMP-01: header, group header and data-start rows chosen on this step are applied server-side before mapping,
+  // so the Map step always sees the real column names. The server ignores unchanged files and refuses worksheets.
+  const applyEdits = useMutation({
+    mutationFn: async () => {
+      if (!batch || batch.worksheet_id) return batch;
+      const editable = batch.files.filter((f) => f.name !== "shopify snapshot");
+      if (editable.length === 0) return batch;
+      return api.imports.editFiles(
+        batch.id,
+        editable.map((f) => ({ index: f.index, header_row: f.header_row, group_header_row: f.group_header_row ?? null, data_start_row: f.data_start_row })),
+      );
+    },
+    onSuccess: (b) => {
+      if (b) onBatch(b);
+      onNext();
+    },
+    onError: (e) => toast(`Could not apply the header rows: ${(e as Error).message}`, "error"),
+  });
   const qc = useQueryClient();
   const [sourceCode, setSourceCode] = useState(batch?.source_code ?? "");
   const [level, setLevel] = useState<Level>(batch?.level ?? "style_color");
@@ -238,8 +256,8 @@ export function UploadStep({
           <span className="muted small">
             {batch.files.length} file{batch.files.length === 1 ? "" : "s"}, {batch.stats?.rows ?? batch.files.reduce((n, f) => n + f.rows, 0)} rows
           </span>
-          <button className="primary" onClick={onNext}>
-            Next: {worksheet ? "Validate" : "Map columns"}
+          <button className="primary" disabled={applyEdits.isPending} onClick={() => applyEdits.mutate()}>
+            {applyEdits.isPending ? "Applying header rows..." : `Next: ${worksheet ? "Validate" : "Map columns"}`}
           </button>
         </div>
       )}
@@ -247,7 +265,7 @@ export function UploadStep({
   );
 }
 
-/** Detected files with editable header rows. Header row edits are sent with the mapping (see MapStep). */
+/** Detected files with editable header rows. Edits are applied through the files endpoint when leaving this step. */
 function DetectedFiles({ batch, onBatch }: { batch: ImportBatch; onBatch: (b: ImportBatch) => void }) {
   const update = (ix: number, patch: Partial<ImportFile>) => {
     onBatch({ ...batch, files: batch.files.map((f) => (f.index === ix ? { ...f, ...patch } : f)) });

@@ -80,14 +80,12 @@ export function MapStep({
   const missing = useMemo(() => missingRequired(batch, mapping, matchKeys, keyless, unmatched), [batch, mapping, matchKeys, keyless, unmatched]);
   const targetMappings = mapping.filter((m) => !m.skip && m.target !== "skip");
 
-  const buildUpdate = (): MappingUpdate & { files: { index: number; header_row: number; group_header_row?: number | null; data_start_row: number }[] } => ({
+  const buildUpdate = (): MappingUpdate => ({
     mapping,
     match_keys: matchKeys,
     options: { on_error: onError, unmatched_policy: unmatched, keyless_name_column: keylessCol || null },
     template_id: batch.template_id ?? undefined,
     precedence,
-    // Header row edits from the Upload step travel with the mapping (not in the contract; ignored by servers that do not read it).
-    files: batch.files.map((f) => ({ index: f.index, header_row: f.header_row, group_header_row: f.group_header_row ?? null, data_start_row: f.data_start_row })),
   });
 
   const save = useMutation({
