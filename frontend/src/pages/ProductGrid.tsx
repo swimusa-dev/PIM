@@ -1,6 +1,6 @@
-// DM-01, DM-02, DM-03, EXP-03: Product grid with level switcher, search, faceted filters, column chooser,
-// multi-column sort, server-side paging (100 rows), virtualized rows, saved views, and spreadsheet-style
-// in-grid editing (navigation, copy/paste of TSV ranges, fill-down, undo).
+// DM-01, DM-02, DM-03, DM-04, EXP-03: Product grid with level switcher, search, faceted filters, column chooser,
+// multi-column sort, server-side paging (100 rows), virtualized rows, saved views, spreadsheet-style
+// in-grid editing (navigation, copy/paste of TSV ranges, fill-down, undo), row selection and bulk actions.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -21,6 +21,7 @@ import { buildFieldCatalog, coreValue, defaultColumns, type FieldDef } from "../
 import { FilterBuilder, describeFilter } from "../grid/FilterBuilder";
 import { ColumnChooser } from "../grid/ColumnChooser";
 import { ViewsMenu } from "../grid/ViewsMenu";
+import { BulkActionsDialog } from "../grid/BulkActionsDialog";
 import { statusKey, useGridEdits, type EditSpec } from "../grid/useGridEdits";
 import { cellValue, clipboardValue, displayValue, LEVEL_LABEL } from "../lib/format";
 import { parseInput } from "../lib/validation";
@@ -61,6 +62,9 @@ export function ProductGridPage() {
   const [sort, setSort] = useState<QuerySort[]>([]);
   const [page, setPage] = useState(1);
   const [activeView, setActiveView] = useState<SavedView | null>(null);
+  // DM-04: row selection for bulk actions (entity ids, kept across pages until the level changes).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulk, setShowBulk] = useState(false);
 
   const listByCode = useMemo(() => {
     const m: Record<string, OptionList> = {};
@@ -130,6 +134,7 @@ export function ProductGridPage() {
     setPage(1);
     setActive(null);
     setAnchor(null);
+    setSelected(new Set());
   };
 
   const currentDefinition: ViewDefinition = useMemo(
@@ -170,6 +175,21 @@ export function ProductGridPage() {
   });
   const rows = useMemo(() => q.data?.rows ?? [], [q.data]);
   const total = q.data?.total ?? 0;
+  const pageAllSelected = rows.length > 0 && rows.every((r) => selected.has(r.entity_id));
+  const toggleSelected = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const togglePage = () =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (pageAllSelected) rows.forEach((r) => n.delete(r.entity_id));
+      else rows.forEach((r) => n.add(r.entity_id));
+      return n;
+    });
 
   // ---- Editing state (DM-03) ----
   const edits = useGridEdits(queryKey, me.data?.email);
@@ -607,6 +627,18 @@ export function ProductGridPage() {
             )}
           </div>
           <div className="row">
+            <button
+              disabled={selected.size === 0 && !activeView}
+              title={selected.size > 0 ? `${selected.size} rows selected` : activeView ? `Apply to the whole view "${activeView.name}"` : "Select rows or apply a saved view first"}
+              onClick={() => setShowBulk(true)}
+            >
+              Bulk actions{selected.size > 0 ? ` (${selected.size})` : activeView ? " (whole view)" : ""}
+            </button>
+            {selected.size > 0 && (
+              <button className="link small" onClick={() => setSelected(new Set())}>
+                Clear selection
+              </button>
+            )}
             <ViewsMenu level={level} current={currentDefinition} activeView={activeView} onApply={applyView} onClear={clearView} />
           </div>
         </div>
@@ -678,6 +710,17 @@ export function ProductGridPage() {
                           toggleSort(key, e.shiftKey);
                         }}
                       >
+                        {ci === 0 && (
+                          <input
+                            type="checkbox"
+                            className="row-select"
+                            checked={pageAllSelected}
+                            onChange={togglePage}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Select all rows on this page"
+                            title="Select all rows on this page"
+                          />
+                        )}
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         {sIx >= 0 && (
                           <span className="sort-ix">
@@ -703,7 +746,7 @@ export function ProductGridPage() {
                 return (
                   <tr key={row.entity_id} data-index={r} style={{ height: ROW_HEIGHT }}>
                     <td
-                      className={`sticky-col${active?.r === r && active.c === 0 ? " active" : ""}`}
+                      className={`sticky-col${active?.r === r && active.c === 0 ? " active" : ""}${selected.has(row.entity_id) ? " row-selected" : ""}`}
                       data-r={r}
                       data-c={0}
                       onMouseDown={() => {
@@ -711,6 +754,15 @@ export function ProductGridPage() {
                         setAnchor({ r, c: 0 });
                       }}
                     >
+                      <input
+                        type="checkbox"
+                        className="row-select"
+                        checked={selected.has(row.entity_id)}
+                        onChange={() => toggleSelected(row.entity_id)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        aria-label={`Select ${row.label}`}
+                      />
                       <Link to={`/products/${encodeURIComponent(row.entity_id)}`} title="Open product detail">
                         {row.label}
                       </Link>
@@ -797,6 +849,18 @@ export function ProductGridPage() {
           </button>
         </span>
       </div>
+      {showBulk && (
+        <BulkActionsDialog
+          level={level}
+          entityIds={Array.from(selected)}
+          view={activeView}
+          onClose={() => setShowBulk(false)}
+          onDone={() => {
+            setSelected(new Set());
+            void q.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

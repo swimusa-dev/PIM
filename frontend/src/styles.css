@@ -1658,3 +1658,14 @@ table.data.compact td {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---------- Phase 2: grid row selection (DM-04) ---------- */
+.grid-table .row-select {
+  width: 13px;
+  height: 13px;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+.grid-table td.row-selected {
+  background: var(--teal-faint);
+}
