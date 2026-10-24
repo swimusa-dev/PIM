@@ -1,0 +1,16 @@
+# IMP-10 placeholder tokens (matched after trim, case-insensitive). means_not_applicable only applies to
+# attributes that allow Not applicable and, for NOT REQUIRED, where the attribute sets not_required_means_na.
+placeholders:
+  - {token: "-"}
+  - {token: "--"}
+  - {token: "undefined"}
+  - {token: "no desc"}
+  - {token: "tbd"}
+  - {token: "place holder"}
+  - {token: "placeholder"}
+  - {token: "null"}
+  - {token: "none"}
+  - {token: "n/a", means_not_applicable: true}
+  - {token: "na", means_not_applicable: true}
+  - {token: "not applicable", means_not_applicable: true}
+  - {token: "not required", means_not_applicable: true}

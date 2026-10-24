@@ -1,0 +1,134 @@
+# Channel profiles (EXP-01), requirement sets (1.3, IMG-02), eligibility (EXP-12), protected fields (EXP-07 v1.3).
+requirement_sets:
+  - code: dtc_core
+    label: DTC core readiness
+    image_rules: {min_width: 2000, min_height: 2000, aspect_ratio: "4:5", background: any, formats: [jpg, png, webp]}
+    requirements:
+      - {attribute_code: product_title, required: true, max_length: 255}
+      - {attribute_code: product_description, required: true}
+      - {attribute_code: customer_color_name, required: true}
+      - {attribute_code: fabric, required: true}
+      - {attribute_code: care_instructions, required: false}
+      - {attribute_code: seo_title, required: true, max_length: 70}
+      - {attribute_code: seo_description, required: true, max_length: 160}
+      - {shot_type: front, required: true}
+      - {shot_type: back, required: true}
+      - {shot_type: on_model_front, required: true}
+      - {shot_type: detail, required: false}
+  - code: walmart_apparel
+    label: Walmart Marketplace apparel
+    image_rules: {min_width: 1500, min_height: 2000, aspect_ratio: "3:4", background: white, formats: [jpg]}
+    requirements:
+      - {attribute_code: product_title, required: true, max_length: 200}
+      - {attribute_code: product_description, required: true}
+      - {attribute_code: customer_color_name, required: true}
+      - {attribute_code: color_family, required: true}
+      - {attribute_code: walmart_product_type, required: true}
+      - {attribute_code: erp_style_content, required: true}
+      - {shot_type: front, required: true}
+      - {shot_type: back, required: true}
+      - {shot_type: swatch, required: true}
+  - code: targetplus_apparel
+    label: Target+ apparel (UNCONFIRMED spec, D-02)
+    image_rules: {min_width: 1200, min_height: 1200, aspect_ratio: "1:1", background: white, formats: [jpg]}
+    requirements:
+      - {attribute_code: product_title, required: true, max_length: 150}
+      - {attribute_code: product_description, required: true}
+      - {attribute_code: customer_color_name, required: true}
+      - {shot_type: front, required: true}
+  - code: nordstrom_apparel
+    label: Nordstrom apparel (path pending D-01)
+    image_rules: {min_width: 2000, min_height: 2000, aspect_ratio: any, background: white, formats: [jpg], no_text_or_logos: true}
+    requirements:
+      - {attribute_code: product_title, required: true}
+      - {attribute_code: product_description, required: true}
+      - {attribute_code: customer_color_name, required: true}
+      - {attribute_code: erp_style_content, required: true}
+      - {shot_type: on_model_front, required: true}
+      - {shot_type: front, required: true}
+
+channels:
+  - code: shopify-vitamina
+    label: Vitamin A Shopify
+    adapter: shopify_admin
+    kind: dtc
+    enabled: true
+    requirement_set: dtc_core
+    # EXP-07 v1.3 / D-09: Layer owns cross-sell data in Shopify. Never written, read back unchanged.
+    protected_fields:
+      - "metafield:shopify--discovery--product_recommendation.complementary_products"
+      - "metafield:shopify--discovery--product_recommendation.related_products"
+      - "Variant Price"
+      - "Variant Inventory Qty"
+      - "Variant Compare At Price"
+    # Our attribute code -> Shopify product CSV column (or "metafield:<namespace>.<key>"). EXP-13 step 2.
+    attribute_mapping:
+      product_title: Title
+      product_description: Body (HTML)
+      shopify_product_type: Type
+      shopify_tags: Tags
+      seo_title: SEO Title
+      seo_description: SEO Description
+      shopify_category: Product Category
+      short_description: "metafield:custom.short_description"
+      fabric.fabric_story: "metafield:custom.fabric_story"
+      fabric.fabric_care: "metafield:custom.care_instructions"
+      print.print_story: "metafield:custom.print_story"
+      customer_color_name: "variant:Option1 Value"
+    eligibility:
+      brand_scopes: [vitamin_a]
+      exclude_classifications: [exclusive_brand, private_label]
+      exclude_lifecycle: [discontinued]
+      exclude_entity_types: [prepack]
+    config:
+      transport: package          # EXP-13 in Phase 1; "api" when EXP-07 is approved
+      store_domain_env: PIM_SHOPIFY_STORE_DOMAIN
+      file_format: shopify_csv
+      max_file_mb: 15
+      handle_attribute: product_title
+  - code: walmart-mp
+    label: Walmart Marketplace
+    adapter: walmart_mp
+    kind: marketplace
+    enabled: false
+    requirement_set: walmart_apparel
+    protected_fields: []
+    attribute_mapping:
+      product_title: productName
+      product_description: shortDescription
+      customer_color_name: color
+      color_family: colorCategory
+      erp_style_content: fabricContent
+    eligibility:
+      brand_scopes: [vitamin_a]
+      exclude_classifications: [exclusive_brand, private_label]
+      exclude_lifecycle: [discontinued]
+      exclude_entity_types: [prepack]
+    config: {spec_version: "5.0", feed_type: MP_ITEM, max_items_per_feed: 5000}
+  - code: targetplus
+    label: Target+
+    adapter: target_plus
+    kind: marketplace
+    enabled: false
+    requirement_set: targetplus_apparel
+    protected_fields: []
+    attribute_mapping: {}
+    eligibility:
+      brand_scopes: [vitamin_a]
+      allow_classifications_for_subdivision: {exclusive_brand: [TARGET], private_label: [TARGET]}
+      exclude_lifecycle: [discontinued]
+      exclude_entity_types: [prepack]
+    config: {integrator: "TODO(decision: D-02)"}
+  - code: nordstrom
+    label: Nordstrom
+    adapter: feed_file
+    kind: retailer
+    enabled: false
+    requirement_set: nordstrom_apparel
+    protected_fields: []
+    attribute_mapping: {}
+    eligibility:
+      brand_scopes: [vitamin_a]
+      exclude_classifications: [exclusive_brand, private_label]
+      exclude_lifecycle: [discontinued]
+    config: {path: "TODO(decision: D-01)", image_naming: "VPN-SupplierColorName-01"}

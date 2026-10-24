@@ -1,0 +1,51 @@
+# RBAC-02 roles. data_rights: group_code -> none|view|edit|approve ("*" = default for unlisted groups).
+# channel_rights: channel_code -> {run, edit_profile} ("*" wildcard). ERP and cost groups are view / none for all
+# roles (P1, D-05); the loader enforces that whatever is written here.
+roles:
+  - code: product_merch
+    label: Product and Merchandising
+    permissions: [import, bulk_edit, run_ai, approve, export]
+    data_rights: {"*": view, style_details: approve, design_tech: approve, merch: approve, ref_print: approve, ref_fabric: approve}
+    channel_rights: {}
+  - code: ecommerce
+    label: Ecommerce and Digital Marketing
+    permissions: [import, bulk_edit, run_ai, approve, export, publish]
+    data_rights: {"*": view, seo: approve, copy: approve, channel_shopify: approve, ref_model: approve}
+    channel_rights: {shopify-vitamina: {run: true, edit_profile: false}}
+  - code: channel_manager
+    label: Wholesale and Marketplace Channel Managers
+    permissions: [import, manage_channels, export, publish]
+    data_rights: {"*": view, channel_walmart: approve, channel_targetplus: approve, channel_nordstrom: approve}
+    channel_rights: {walmart-mp: {run: true, edit_profile: true}, targetplus: {run: true, edit_profile: true}, nordstrom: {run: true, edit_profile: true}}
+  - code: pim_admin
+    label: PIM Admin
+    permissions: [import, bulk_edit, run_ai, approve, manage_channels, export, publish, admin_metadata, manage_users]
+    data_rights: {"*": approve}
+    channel_rights: {"*": {run: true, edit_profile: true}}
+  - code: viewer
+    label: Viewer
+    permissions: [export]
+    data_rights: {"*": view}
+    channel_rights: {}
+  - code: finance
+    label: Finance (cost visibility, D-05)
+    permissions: [view_cost]
+    data_rights: {"*": view, cost: view}
+    channel_rights: {}
+
+# RBAC-04 brand scopes: a scope matches when any rule matches; all conditions inside a rule must match.
+brand_scopes:
+  - code: vitamin_a
+    label: Vitamin A
+    rules:
+      - [{field: division, op: eq, value: VITAMIN A}]
+      - [{field: division, op: eq, value: MAINSTREAM}, {field: sub_division, op: contains, value: VITAMIN A}]  # TODO(decision: D-11)
+  - code: ralph_lauren_swim
+    label: Ralph Lauren Swim (future phase, D-12)
+    enabled: false
+    rules:
+      - [{field: division, op: contains, value: RALPH LAUREN}]
+
+# Initial user assignments (role_source=table). Edit in Admin > User roles.
+user_roles:
+  - {email: dchristy@swimusa.com, role_code: pim_admin, brand_scopes: []}

@@ -1,0 +1,44 @@
+# Databricks App runtime configuration (PLT-00, ARC-01).
+# The app must bind 0.0.0.0:$DATABRICKS_APP_PORT; pim.serve reads that variable [D5].
+command: ["python", "-m", "pim.serve"]
+env:
+  - name: PYTHONPATH
+    value: "backend"
+  - name: PIM_ENV
+    value: "databricks"
+  - name: PIM_ROLE_SOURCE
+    # "groups" maps Entra/Databricks groups to roles via the OBO token (RBAC-01, preferred).
+    # "table" uses the in-app user_role table keyed by X-Forwarded-Email (fallback).
+    value: "table"
+  - name: PIM_LAKEBASE_INSTANCE
+    valueFrom: lakebase
+  - name: PIM_SQL_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: PIM_IMPORT_VOLUME
+    value: "/Volumes/swim_data_whse/pim/imports"
+  - name: PIM_PACKAGE_VOLUME
+    value: "/Volumes/swim_data_whse/pim/packages"
+  - name: PIM_STYLE_MASTER_TABLE
+    value: "swim_data_whse.bluecherry.style_master"
+  - name: PIM_AI_ENDPOINT_COPY
+    value: "databricks-claude-sonnet-4-5"
+  - name: PIM_AI_ENDPOINT_CLASSIFY
+    value: "databricks-claude-haiku-4-5"
+  - name: PIM_AIR_API_KEY
+    valueFrom: air-api-key
+  - name: PIM_SHOPIFY_READ_TOKEN
+    valueFrom: shopify-read-token
+  - name: PIM_SHOPIFY_STORE_DOMAIN
+    value: "vitamin-a.myshopify.com"
+  # Job ids injected from the job resources so the app can enqueue runs (ARC-04)
+  - name: DATABRICKS_JOB_ID_INGEST
+    valueFrom: ingest-job
+  - name: DATABRICKS_JOB_ID_AIR_POLL
+    valueFrom: air-poll-job
+  - name: DATABRICKS_JOB_ID_PACKAGE
+    valueFrom: package-job
+  - name: DATABRICKS_JOB_ID_HISTORY
+    valueFrom: history-job
+  - name: PIM_FEATURE_SHOPIFY_DIRECT_WRITE
+    # EXP-07 stays off until the owner approves direct writes (EXP-13 is the Phase 1 path).
+    value: "false"

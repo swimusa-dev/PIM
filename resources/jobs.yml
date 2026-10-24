@@ -1,0 +1,133 @@
+# Lakeflow Jobs for long-running work (ARC-04). Each job runs a module in backend/pim/jobs on serverless compute.
+# Jobs do not inherit the app's resource env vars, so Lakebase and warehouse settings are passed as parameters
+# (see backend/pim/jobs/_common.py). The identity that runs the job (you in dev, the SP in prod) must be a
+# Lakebase role with privileges on database `pim` (docs/SETUP_AND_DEPLOY.md step 3).
+variables:
+  lakebase_host:
+    description: Lakebase instance DNS host (Compute > Lakebase Postgres > instance > Connection details)
+  lakebase_user:
+    description: Postgres role used by jobs. Your user email in dev; the service principal application id in prod.
+  lakebase_database:
+    default: pim
+
+resources:
+  jobs:
+    pim_bootstrap:
+      name: "[PIM] Bootstrap: Alembic upgrade + seed metadata"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: bootstrap
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_bootstrap.py
+            parameters: &conn ["--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                               "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                               "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
+    pim_style_master_ingest:
+      name: "[PIM] Style Master ingest (IMP-09)"
+      schedule:
+        quartz_cron_expression: "0 0 */2 * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: ingest
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_ingest.py
+            parameters: ["--source", "delta", "--table", "${var.catalog}.bluecherry.style_master",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
+    pim_air_poll:
+      name: "[PIM] Air DAM poll and image match (IMG-01, IMG-03)"
+      schedule:
+        quartz_cron_expression: "0 30 * * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: poll
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_air_poll.py
+            parameters: *conn
+        - task_key: match
+          depends_on: [{task_key: poll}]
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_image_match.py
+            parameters: *conn
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
+    pim_shopify_package:
+      name: "[PIM] Shopify update package (EXP-13)"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: build_package
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_shopify_package.py
+            parameters: ["--package-id", "{{job.parameters.package_id}}",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: package_id, default: ""}
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 3
+
+    pim_publish_history:
+      name: "[PIM] Publish gold tables and history to Delta (ARC-02, GOV-02)"
+      schedule:
+        quartz_cron_expression: "0 15 1 * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: publish
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_publish_history.py
+            parameters: ["--catalog", "${var.catalog}", "--schema", "${var.schema}",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1

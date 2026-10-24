@@ -1,0 +1,10 @@
+# DM-07 seed workflow. Started by IMP-09 for new style-colors. UI for workflows is Phase 2.
+workflows:
+  - code: new_style_color_launch
+    label: New style-color launch
+    entry_rule: {on: new_style_color}
+    steps:
+      - {position: 1, label: Design & Tech enrichment, kind: enrich, role_code: product_merch, group_codes: [style_details, design_tech], due_in_days: 5}
+      - {position: 2, label: Merch enrichment, kind: enrich, role_code: product_merch, group_codes: [merch], due_in_days: 3}
+      - {position: 3, label: SEO and Copy, kind: enrich, role_code: ecommerce, group_codes: [seo, copy], due_in_days: 5}
+      - {position: 4, label: Ecommerce review, kind: review, role_code: ecommerce, group_codes: [seo, copy, channel_shopify], channel_codes: [shopify-vitamina], due_in_days: 2}

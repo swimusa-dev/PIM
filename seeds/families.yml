@@ -1,0 +1,26 @@
+# Families (1.3): which attribute groups apply to a product type. erp_match assigns a family from ERP fields on ingest.
+families:
+  - code: swim_top
+    label: Swim Top
+    erp_match: {field: product_type, in: [TOP, BRALETTE, BANDEAU, TRIANGLE TOP]}
+    groups: [erp, style_details, design_tech, merch, seo, copy, channel_shopify, channel_walmart, channel_targetplus, channel_nordstrom]
+  - code: swim_bottom
+    label: Swim Bottom
+    erp_match: {field: product_type, in: [BOTTOM, HIPSTER, HIGH WAIST]}
+    groups: [erp, style_details, design_tech, merch, seo, copy, channel_shopify, channel_walmart, channel_targetplus, channel_nordstrom]
+  - code: one_piece
+    label: One-Piece
+    erp_match: {field: product_type, in: [ONE PIECE, ONE-PIECE, MAILLOT]}
+    groups: [erp, style_details, design_tech, merch, seo, copy, channel_shopify, channel_walmart, channel_targetplus, channel_nordstrom]
+  - code: cover_up
+    label: Cover-Up
+    erp_match: {field: product_type, in: [COVER UP, COVER-UP, SARONG, DRESS, PANT, SKIRT]}
+    groups: [erp, style_details, design_tech, merch, seo, copy, channel_shopify, channel_walmart, channel_targetplus, channel_nordstrom]
+  - code: apparel
+    label: Apparel
+    erp_match: {field: product_type, in: [KNIT, SWEATER, TEE, APPAREL]}
+    groups: [erp, style_details, design_tech, merch, seo, copy, channel_shopify, channel_nordstrom]
+  - code: unassigned
+    label: Unassigned
+    erp_match: {}
+    groups: [erp, style_details, merch, copy]

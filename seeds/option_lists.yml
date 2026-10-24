@@ -1,0 +1,153 @@
+# Option lists (1.3) and size scales (DM-14). channel_mappings: channel_code -> value the channel accepts.
+option_lists:
+  - code: brand_classification
+    label: Brand classification
+    values:
+      - {code: national_brand, label: National Brand}
+      - {code: exclusive_brand, label: Exclusive Brand}
+      - {code: private_label, label: Private Label}
+  - code: material_claim
+    label: Material claim
+    values:
+      - {code: rcs, label: Recycled Claim Standard (RCS)}
+      - {code: grs, label: Global Recycled Standard (GRS)}
+      - {code: gots, label: GOTS}
+      - {code: ocs, label: OCS}
+      - {code: none, label: No claim}
+  - code: certification
+    label: Certification
+    values:
+      - {code: rcs, label: RCS}
+      - {code: grs, label: GRS}
+      - {code: gots, label: GOTS}
+      - {code: ocs, label: OCS}
+      - {code: repreve, label: "REPREVE®"}
+      - {code: oeko_tex, label: "OEKO-TEX®"}
+  - code: closure
+    label: Closure
+    values:
+      - {code: adjustable, label: Adjustable}
+      - {code: hook_eye, label: Hook and eye}
+      - {code: tie, label: Tie}
+      - {code: pull_on, label: Pull on}
+      - {code: zipper, label: Zipper}
+  - code: silhouette
+    label: Silhouette
+    values:
+      - {code: bralette, label: Bralette}
+      - {code: triangle, label: Triangle}
+      - {code: bandeau, label: Bandeau}
+      - {code: one_piece, label: One-piece}
+      - {code: high_waist, label: High waist bottom}
+      - {code: hipster, label: Hipster}
+      - {code: cover_up, label: Cover-up}
+  - code: neckline
+    label: Neckline
+    values:
+      - {code: v_neck, label: V-neck}
+      - {code: scoop, label: Scoop}
+      - {code: square, label: Square}
+      - {code: halter, label: Halter}
+      - {code: plunge, label: Plunge}
+  - code: strap_type
+    label: Strap type
+    values:
+      - {code: adjustable, label: Adjustable}
+      - {code: fixed, label: Fixed}
+      - {code: convertible, label: Convertible}
+      - {code: strapless, label: Strapless}
+  - code: coverage
+    label: Coverage
+    values:
+      - {code: full, label: Full}
+      - {code: moderate, label: Moderate}
+      - {code: cheeky, label: Cheeky}
+  - code: product_feature
+    label: Product feature
+    values:
+      - {code: removable_cups, label: Removable cups}
+      - {code: fully_lined, label: Fully lined}
+      - {code: reversible, label: Reversible}
+      - {code: upf_50, label: UPF 50+}
+  - code: lining
+    label: Lining
+    values:
+      - {code: full, label: Fully lined}
+      - {code: partial, label: Partially lined}
+      - {code: unlined, label: Unlined}
+  - code: care_instructions
+    label: Care instructions
+    values:
+      - {code: hand_wash_cold_dry_flat, label: "Hand wash cold. Dry flat."}
+      - {code: hand_wash_cold_line_dry, label: "Hand wash cold. Line dry."}
+      - {code: machine_wash_cold_delicate, label: "Machine wash cold, delicate. Dry flat."}
+  - code: color_family
+    label: Color family
+    values:
+      - {code: black, label: Black, channel_mappings: {walmart-mp: Black, targetplus: Black}}
+      - {code: white, label: White, channel_mappings: {walmart-mp: White, targetplus: White}}
+      - {code: blue, label: Blue, channel_mappings: {walmart-mp: Blue, targetplus: Blue}}
+      - {code: green, label: Green, channel_mappings: {walmart-mp: Green, targetplus: Green}}
+      - {code: pink, label: Pink, channel_mappings: {walmart-mp: Pink, targetplus: Pink}}
+      - {code: red, label: Red, channel_mappings: {walmart-mp: Red, targetplus: Red}}
+      - {code: multi, label: Multi, channel_mappings: {walmart-mp: Multi-color, targetplus: Multicolored}}
+      - {code: neutral, label: Neutral, channel_mappings: {walmart-mp: Beige, targetplus: Beige}}
+  - code: print_category
+    label: Print category
+    values:
+      - {code: floral, label: Floral}
+      - {code: geometric, label: Geometric}
+      - {code: solid, label: Solid}
+      - {code: stripe, label: Stripe}
+  - code: merch_segment
+    label: Merchandising segment
+    values:
+      - {code: swim_core, label: Swim core}
+      - {code: swim_last_year, label: Swim last year}
+      - {code: beachwear_margin_builder, label: Beachwear margin builder}
+      - {code: third_party_vendor, label: 3rd party vendor}
+
+size_scales:
+  - code: size_missy_alpha
+    label: Missy alpha sizes
+    size_group: missy
+    values:
+      - {code: XXS, label: XXS, sort_order: 10, channel_mappings: {walmart-mp: XXS, targetplus: XXS, nordstrom: XXS}}
+      - {code: XS, label: XS, sort_order: 20, channel_mappings: {walmart-mp: XS, targetplus: XS, nordstrom: XS}}
+      - {code: S, label: S, sort_order: 30, channel_mappings: {walmart-mp: S, targetplus: S, nordstrom: S}}
+      - {code: M, label: M, sort_order: 40, channel_mappings: {walmart-mp: M, targetplus: M, nordstrom: M}}
+      - {code: L, label: L, sort_order: 50, channel_mappings: {walmart-mp: L, targetplus: L, nordstrom: L}}
+      - {code: XL, label: XL, sort_order: 60, channel_mappings: {walmart-mp: XL, targetplus: XL, nordstrom: XL}}
+      - {code: XXL, label: XXL, sort_order: 70, channel_mappings: {walmart-mp: XXL, targetplus: XXL, nordstrom: XXL}}
+  - code: size_combined_alpha
+    label: Combined alpha sizes (Vitamin A)
+    size_group: missy
+    values:
+      - {code: "XS/S", label: "XS/S", sort_order: 10, channel_mappings: {walmart-mp: "XS-S", targetplus: "XS/S", nordstrom: "XS/S"}}
+      - {code: "M/L", label: "M/L", sort_order: 20, channel_mappings: {walmart-mp: "M-L", targetplus: "M/L", nordstrom: "M/L"}}
+      - {code: "P-S", label: "P-S", sort_order: 5, channel_mappings: {walmart-mp: "XS-S", targetplus: "P/S", nordstrom: "P-S"}}
+      - {code: XLXXL, label: "XL/XXL", sort_order: 30, channel_mappings: {walmart-mp: "XL-XXL", targetplus: "XL/XXL", nordstrom: "XL/XXL"}}
+  - code: size_cup
+    label: Cup sizes
+    size_group: cup
+    values:
+      - {code: "A/B", label: "A/B", sort_order: 10}
+      - {code: "C", label: "C", sort_order: 20}
+      - {code: "D/DD", label: "D/DD", sort_order: 30}
+  - code: size_one
+    label: One size
+    size_group: one_size
+    values:
+      - {code: OS, label: One size, sort_order: 10, channel_mappings: {walmart-mp: One Size, targetplus: One Size, nordstrom: O/S}}
+  - code: size_numeric
+    label: Numeric sizes
+    size_group: missy
+    values:
+      - {code: "0", label: "0", sort_order: 0}
+      - {code: "2", label: "2", sort_order: 2}
+      - {code: "4", label: "4", sort_order: 4}
+      - {code: "6", label: "6", sort_order: 6}
+      - {code: "8", label: "8", sort_order: 8}
+      - {code: "10", label: "10", sort_order: 10}
+      - {code: "12", label: "12", sort_order: 12}
+      - {code: "14", label: "14", sort_order: 14}

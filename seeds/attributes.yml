@@ -1,0 +1,88 @@
+# Attribute definitions (1.3). This is seed metadata, editable by the PIM Admin; nothing here is referenced by code.
+# level: style | style_color | sku | ref:print | ref:fabric | ref:model
+# source_of_truth: erp | plm | pim | channel. ERP attributes carry erp_column (the Style Master column, IMP-09)
+# and are read-only for every role (P1). Column names below are the ones seen in the Image Relay export and the
+# VAS Product Information Request; confirm them against swim_data_whse.bluecherry.style_master on first ingest.
+attributes:
+  # ---- ERP (read-only) --------------------------------------------------------------------------
+  - {code: erp_style_description, label: Style Description (ERP), data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: style_description, owner_role: product_merch}
+  - {code: erp_division, label: Division, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: division}
+  - {code: erp_sub_division, label: Sub-Division, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: sub_division}
+  - {code: erp_brand_name, label: Brand Name (ERP segment), data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: brand_name, help_text: "Mixes brand with merchandising segment (F9). Brand membership comes from brand scopes, not this field."}
+  - {code: erp_brand_classification, label: Brand Classification, data_type: single_select, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: brand_classification, option_list_code: brand_classification}
+  - {code: erp_season, label: Season, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: season}
+  - {code: erp_delivery_date, label: Wholesale delivery date, data_type: date, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: delivery_date}
+  - {code: erp_style_status, label: Style status, data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: style_status, help_text: "For example Repeat Body / New Color (DM-12)."}
+  - {code: erp_color_description, label: Color Description (ERP), data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: color_description}
+  - {code: erp_style_content, label: Fiber content (ERP Style Content Desc), data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: style_content_desc, help_text: "ERP wins over PLM (D-08). Candidate for the ERP data quality report."}
+  - {code: erp_material_claim, label: Material Claim, data_type: single_select, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: material_claim, option_list_code: material_claim}
+  - {code: erp_scope_certificate, label: Scope Certificate, data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: scope_certificate}
+  - {code: erp_transaction_certificate, label: Transaction Certificate, data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: transaction_certificate}
+  - {code: erp_closure, label: Closure (ERP), data_type: single_select, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: closure, option_list_code: closure}
+  - {code: erp_country_of_origin, label: Country of origin, data_type: text, level: style_color, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: country_of_origin}
+  - {code: erp_gms_style_no, label: Legacy GMS style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: gms_style_no}
+  - {code: erp_vendor_style, label: Vendor style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: vendor_style}
+  - {code: erp_standard_cost, label: Standard Cost, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: standard_cost, unit: USD, cost_restricted: true}
+  - {code: erp_retail_msrp, label: Retail MSRP, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: retail_msrp, unit: USD, cost_restricted: true}
+
+  # ---- Style Details (PIM-owned) -----------------------------------------------------------------
+  - {code: product_name, label: Product name, data_type: text, level: style, group_code: style_details, source_of_truth: pim, status: confirmed, owner_role: product_merch, validation: {max_length: 120}, example_value: Skylar Top}
+  - {code: silhouette, label: Silhouette, data_type: single_select, level: style, group_code: style_details, source_of_truth: pim, status: proposed, option_list_code: silhouette, owner_role: product_merch}
+  - {code: neckline, label: Neckline, data_type: single_select, level: style, group_code: style_details, source_of_truth: pim, status: proposed, option_list_code: neckline, allows_not_applicable: true}
+  - {code: strap_type, label: Strap type, data_type: single_select, level: style, group_code: style_details, source_of_truth: pim, status: proposed, option_list_code: strap_type, allows_not_applicable: true}
+  - {code: underwire, label: Underwire, data_type: boolean, level: style, group_code: style_details, source_of_truth: pim, status: proposed, allows_not_applicable: true}
+  - {code: coverage, label: Coverage, data_type: single_select, level: style, group_code: style_details, source_of_truth: pim, status: proposed, option_list_code: coverage, allows_not_applicable: true}
+  - {code: product_features, label: Product features, data_type: multi_select, level: style, group_code: style_details, source_of_truth: pim, status: proposed, option_list_code: product_feature}
+  - {code: customer_color_name, label: Customer-facing color name, data_type: text, level: style_color, group_code: style_details, source_of_truth: pim, status: confirmed, owner_role: product_merch, validation: {max_length: 60}, help_text: "Expanded from the ERP color code, for example FSTVL PINK to Festival Pink (AI-05 task 7)."}
+  - {code: color_family, label: Color family, data_type: single_select, level: style_color, group_code: style_details, source_of_truth: pim, status: confirmed, option_list_code: color_family}
+  - {code: print, label: Print, data_type: reference_entity, level: style_color, group_code: style_details, source_of_truth: pim, status: confirmed, reference_type_code: print, allows_not_applicable: true}
+  - {code: fabric, label: Fabric, data_type: reference_entity, level: style_color, group_code: style_details, source_of_truth: pim, status: confirmed, reference_type_code: fabric}
+
+  # ---- Design & Tech ---------------------------------------------------------------------------
+  - {code: care_instructions, label: Care instructions, data_type: single_select, level: style, group_code: design_tech, source_of_truth: pim, status: confirmed, option_list_code: care_instructions, help_text: "Prefer the Fabric entity's care instructions; this overrides per style."}
+  - {code: product_measurements, label: Product measurements, data_type: rich_text, level: style, group_code: design_tech, source_of_truth: pim, status: proposed, unit: in, help_text: "Measurements with units, for example front rise 3 1/4 in."}
+  - {code: weight, label: Weight, data_type: number, level: style_color, group_code: design_tech, source_of_truth: pim, status: proposed, unit: lb, validation: {min: 0, max: 50}}
+  - {code: lining, label: Lining, data_type: single_select, level: style, group_code: design_tech, source_of_truth: pim, status: proposed, option_list_code: lining, allows_not_applicable: true}
+  - {code: model_profile, label: Model profile, data_type: reference_entity, level: style_color, group_code: design_tech, source_of_truth: pim, status: proposed, reference_type_code: model}
+
+  # ---- Merch -----------------------------------------------------------------------------------
+  - {code: ecomm_launch_date, label: Ecomm launch date, data_type: date, level: style_color, group_code: merch, source_of_truth: pim, status: confirmed, owner_role: product_merch, help_text: "Drives the New style-color launch workflow (DM-07, DM-10)."}
+  - {code: merch_segment, label: Merchandising segment, data_type: single_select, level: style, group_code: merch, source_of_truth: pim, status: proposed, option_list_code: merch_segment, help_text: "Segments that live in Brand Name today (RBAC-04)."}
+  - {code: merch_notes, label: Merch notes, data_type: rich_text, level: style_color, group_code: merch, source_of_truth: pim, status: proposed}
+  - {code: collection, label: Collection, data_type: text, level: style, group_code: merch, source_of_truth: pim, status: proposed, validation: {max_length: 80}}
+
+  # ---- SEO -------------------------------------------------------------------------------------
+  - {code: seo_title, label: SEO title, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 70}, channel_scopable: true}
+  - {code: seo_description, label: SEO meta description, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 160}, channel_scopable: true}
+  - {code: seo_keywords, label: SEO keywords, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: proposed, validation: {max_length: 300}}
+
+  # ---- Copy ------------------------------------------------------------------------------------
+  - {code: product_title, label: Product title, data_type: text, level: style_color, group_code: copy, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 255}, channel_scopable: true}
+  - {code: product_description, label: Product description, data_type: rich_text, level: style, group_code: copy, source_of_truth: pim, status: confirmed, owner_role: ecommerce, channel_scopable: true, validation: {max_length: 5000}}
+  - {code: short_description, label: Short description, data_type: text, level: style, group_code: copy, source_of_truth: pim, status: confirmed, validation: {max_length: 300}, channel_scopable: true}
+  - {code: bullet_points, label: Bullet points, data_type: rich_text, level: style, group_code: copy, source_of_truth: pim, status: proposed, channel_scopable: true}
+  - {code: fit_details, label: Fit details (legacy combined), data_type: rich_text, level: style, group_code: copy, source_of_truth: pim, status: deprecated, help_text: "Legacy combined field (F13). AI task Restructure splits it into features, measurements, and Model profile."}
+
+  # ---- Shopify channel-only -------------------------------------------------------------------
+  - {code: shopify_product_type, label: Shopify product type, data_type: text, level: style, group_code: channel_shopify, source_of_truth: channel, status: proposed, validation: {max_length: 255}}
+  - {code: shopify_tags, label: Shopify tags, data_type: text, level: style_color, group_code: channel_shopify, source_of_truth: channel, status: proposed}
+  - {code: shopify_category, label: Shopify standard product category, data_type: text, level: style, group_code: channel_shopify, source_of_truth: channel, status: proposed}
+
+  # ---- Walmart channel-only -------------------------------------------------------------------
+  - {code: walmart_product_type, label: Walmart product type, data_type: text, level: style, group_code: channel_walmart, source_of_truth: channel, status: proposed}
+
+  # ---- Reference entity: Print ------------------------------------------------------------------
+  - {code: print_name, label: Print name, data_type: text, level: "ref:print", group_code: ref_print, source_of_truth: pim, status: confirmed, validation: {max_length: 100}}
+  - {code: print_story, label: Print story, data_type: rich_text, level: "ref:print", group_code: ref_print, source_of_truth: pim, status: confirmed}
+  - {code: print_category, label: Print category, data_type: single_select, level: "ref:print", group_code: ref_print, source_of_truth: pim, status: proposed, option_list_code: print_category}
+  # ---- Reference entity: Fabric -----------------------------------------------------------------
+  - {code: fabric_name, label: Fabric name, data_type: text, level: "ref:fabric", group_code: ref_fabric, source_of_truth: pim, status: confirmed, validation: {max_length: 100}, example_value: EcoRib}
+  - {code: fabric_story, label: Fabric story, data_type: rich_text, level: "ref:fabric", group_code: ref_fabric, source_of_truth: pim, status: confirmed}
+  - {code: fabric_care, label: Care instructions, data_type: single_select, level: "ref:fabric", group_code: ref_fabric, source_of_truth: pim, status: confirmed, option_list_code: care_instructions}
+  - {code: fabric_sustainability, label: Sustainability copy, data_type: rich_text, level: "ref:fabric", group_code: ref_fabric, source_of_truth: pim, status: confirmed}
+  - {code: fabric_certifications, label: Certifications, data_type: multi_select, level: "ref:fabric", group_code: ref_fabric, source_of_truth: pim, status: confirmed, option_list_code: certification, help_text: "A claim is allowed in copy only when the Fabric references a certificate record (AI-06)."}
+  # ---- Reference entity: Model profile -----------------------------------------------------------
+  - {code: model_name, label: Model name, data_type: text, level: "ref:model", group_code: ref_model, source_of_truth: pim, status: confirmed}
+  - {code: model_height, label: Height, data_type: text, level: "ref:model", group_code: ref_model, source_of_truth: pim, status: confirmed, unit: in}
+  - {code: model_measurements, label: Measurements, data_type: text, level: "ref:model", group_code: ref_model, source_of_truth: pim, status: confirmed, unit: in}
+  - {code: model_size_worn, label: Size worn, data_type: text, level: "ref:model", group_code: ref_model, source_of_truth: pim, status: confirmed}

@@ -1,0 +1,73 @@
+# Attribute groups (1.3). Owning role codes come from roles.yml. survivorship: trusted_source | fill_empty_only | most_recent | never_from_import
+groups:
+  - code: erp
+    label: ERP (read-only)
+    owning_role: pim_admin
+    sort_order: 0
+    read_only: true
+    survivorship: never_from_import
+    exclude_from_quality: true
+  - code: style_details
+    label: Style Details
+    owning_role: product_merch
+    sort_order: 10
+    survivorship: fill_empty_only
+  - code: design_tech
+    label: Design & Tech
+    owning_role: product_merch
+    sort_order: 20
+    survivorship: fill_empty_only
+  - code: merch
+    label: Merch
+    owning_role: product_merch
+    sort_order: 30
+    survivorship: fill_empty_only
+  - code: seo
+    label: SEO
+    owning_role: ecommerce
+    sort_order: 40
+    survivorship: fill_empty_only
+  - code: copy
+    label: Copy
+    owning_role: ecommerce
+    sort_order: 50
+    survivorship: fill_empty_only
+  - code: cost
+    label: Cost and pricing (restricted)
+    owning_role: pim_admin
+    sort_order: 60
+    read_only: true
+    survivorship: never_from_import
+    exclude_from_quality: true
+  - code: channel_shopify
+    label: Shopify channel
+    owning_role: ecommerce
+    sort_order: 100
+    channel_code: shopify-vitamina
+  - code: channel_walmart
+    label: Walmart Marketplace channel
+    owning_role: channel_manager
+    sort_order: 110
+    channel_code: walmart-mp
+  - code: channel_targetplus
+    label: Target+ channel
+    owning_role: channel_manager
+    sort_order: 120
+    channel_code: targetplus
+  - code: channel_nordstrom
+    label: Nordstrom channel
+    owning_role: channel_manager
+    sort_order: 130
+    channel_code: nordstrom
+  - code: ref_print
+    label: Print
+    owning_role: product_merch
+    sort_order: 200
+  - code: ref_fabric
+    label: Fabric
+    owning_role: product_merch
+    sort_order: 210
+  - code: ref_model
+    label: Model profile
+    owning_role: ecommerce
+    sort_order: 220
