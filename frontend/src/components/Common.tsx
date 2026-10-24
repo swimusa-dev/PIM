@@ -1,7 +1,7 @@
-// Shared feedback and display primitives: Spinner, ErrorBox, Empty, Dialog, Toast, badges, pills.
+// Shared feedback and display primitives: Spinner, ErrorBox, Empty, Dialog, Toast, badges, pills (GOV-03: GradePill).
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ApprovalState, Readiness, ValueCell } from "../api/types";
+import type { ApprovalState, QualityGrade, Readiness, ValueCell } from "../api/types";
 import { errorMessage } from "../api/client";
 import { provenanceText, readOnlyText } from "../lib/format";
 
@@ -138,6 +138,31 @@ export function PercentPill({ value }: { value: number | undefined | null }) {
   if (value === undefined || value === null) return <span className="faint">n/a</span>;
   const cls = value >= 100 ? "p-high" : value >= 70 ? "p-mid" : "p-low";
   return <span className={`pill ${cls}`}>{Math.round(value)}%</span>;
+}
+
+/** GOV-03 quality grade A to E, colored, with the score as the tooltip. */
+export function GradePill({ grade, score }: { grade: QualityGrade | string | undefined | null; score?: number | null }) {
+  if (!grade) return <span className="faint">n/a</span>;
+  const tip = score === undefined || score === null ? `Grade ${grade}` : `Grade ${grade}, score ${Math.round(score * 10) / 10}`;
+  return (
+    <span className={`grade g${grade}`} title={tip}>
+      {grade}
+    </span>
+  );
+}
+
+/** GOV-03 stacked grade counts as spans (A to E). */
+export function GradeBar({ counts, title }: { counts: Record<"A" | "B" | "C" | "D" | "E", number>; title?: string }) {
+  const grades = ["A", "B", "C", "D", "E"] as const;
+  const total = grades.reduce((n, g) => n + (counts[g] ?? 0), 0);
+  if (total === 0) return <div className="bar grade-bar empty-bar" title="No scores" />;
+  return (
+    <div className="bar grade-bar" title={title ?? grades.map((g) => `${g}: ${counts[g] ?? 0}`).join(", ")}>
+      {grades.map((g) => (
+        <span key={g} className={`seg g${g}`} style={{ width: `${((counts[g] ?? 0) / total) * 100}%` }} />
+      ))}
+    </div>
+  );
 }
 
 export function readinessTip(r: Readiness | undefined): string {

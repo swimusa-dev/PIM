@@ -1,16 +1,21 @@
-// DM-08: Approval queue grouped by submitter, field-level current vs proposed, approve or reject with comment.
+// DM-08, AI-04: Approval queue grouped by submitter, field-level current vs proposed, approve or reject with comment.
+// Phase 4 adds a Run filter (AI runs with drafts in the queue), run and template chips on items, and "Accept all in
+// run" (POST /api/ai/runs/{id}/accept-all) for approvers.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
-import { useAttributes, useGroups, useMe, useOptionLists } from "../api/hooks";
-import { Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
+import { aiApi, api } from "../api/client";
+import { canApprove, useAttributes, useGroups, useMe, useOptionLists } from "../api/hooks";
+import { Badge, Confirm, Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
+import { shortId } from "../ai/shared";
 import { displayValue, formatDate } from "../lib/format";
 import type { OptionList } from "../api/types";
 
 export function ApprovalsPage() {
   const [group, setGroup] = useState("");
+  const [runId, setRunId] = useState("");
+  const [confirmAcceptAll, setConfirmAcceptAll] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [decision, setDecision] = useState<"approve" | "reject" | null>(null);
   const [comment, setComment] = useState("");
@@ -18,7 +23,7 @@ export function ApprovalsPage() {
   const toast = useToast();
   const me = useMe();
 
-  const q = useQuery({ queryKey: ["approvals", group], queryFn: () => api.approvals.queue(group || undefined) });
+  const q = useQuery({ queryKey: ["approvals", group, runId], queryFn: () => api.approvals.queue(group || undefined, runId || undefined) });
   const attrs = useAttributes();
   const groups = useGroups();
   const optionLists = useOptionLists();
@@ -50,6 +55,27 @@ export function ApprovalsPage() {
   });
 
   const allIds = useMemo(() => (q.data?.groups ?? []).flatMap((g) => g.items.map((i) => i.draft_id)), [q.data]);
+
+  // AI-04: runs come with the response; keep the last non-empty list so the filter does not vanish while filtered.
+  const runs = useMemo(() => q.data?.runs ?? [], [q.data]);
+  const runById = useMemo(() => new Map(runs.map((r) => [r.run_id, r])), [runs]);
+  const selectedRun = runById.get(runId);
+  // Accept all needs approve rights on every group the run writes; the server checks again.
+  const runItems = useMemo(() => (q.data?.groups ?? []).flatMap((g) => g.items).filter((i) => !runId || i.run_id === runId), [q.data, runId]);
+  const canAcceptAll =
+    !!runId && runItems.length > 0 && runItems.every((i) => canApprove(me.data, attrByCode.get(i.attribute_code)));
+  const acceptAll = useMutation({
+    mutationFn: () => aiApi.acceptAll(runId),
+    onSuccess: (r) => {
+      toast(`Accepted ${r.accepted} suggestion${r.accepted === 1 ? "" : "s"}${r.skipped ? `, skipped ${r.skipped}` : ""}.`, "ok");
+      setConfirmAcceptAll(false);
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["approvals"] });
+      qc.invalidateQueries({ queryKey: ["ai"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+    onError: (e) => toast(`Accept all failed: ${String((e as Error).message)}`, "error"),
+  });
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s);
@@ -79,6 +105,25 @@ export function ApprovalsPage() {
               </option>
             ))}
           </select>
+          <select value={runId} onChange={(e) => { setRunId(e.target.value); setSelected(new Set()); }} title="Filter by AI run" disabled={runs.length === 0 && !runId}>
+            <option value="">All sources{runs.length ? "" : " (no AI runs in the queue)"}</option>
+            {runs.map((r) => (
+              <option key={r.run_id} value={r.run_id}>
+                Run {shortId(r.run_id)}: {r.template_code} ({r.count})
+              </option>
+            ))}
+            {runId && !runById.has(runId) && <option value={runId}>Run {shortId(runId)}</option>}
+          </select>
+          {runId && (
+            <button
+              className="primary"
+              disabled={!canAcceptAll || acceptAll.isPending}
+              title={canAcceptAll ? "Approve every proposed draft of this run" : "Needs approve rights on every attribute group the run writes"}
+              onClick={() => setConfirmAcceptAll(true)}
+            >
+              Accept all in run
+            </button>
+          )}
           <button onClick={() => setSelected(new Set(allIds))} disabled={allIds.length === 0}>
             Select all
           </button>
@@ -137,6 +182,14 @@ export function ApprovalsPage() {
                           </td>
                           <td>
                             <Link to={`/products/${encodeURIComponent(it.entity_id)}`}>{it.label}</Link>
+                            {it.run_id && (
+                              <div className="chips" style={{ marginTop: 2 }}>
+                                <Link to={`/ai/runs/${encodeURIComponent(it.run_id)}`} className="badge purple" title="Open the AI run">
+                                  run {shortId(it.run_id)}
+                                </Link>
+                                {runById.get(it.run_id)?.template_code && <Badge title="Prompt template">{runById.get(it.run_id)!.template_code}</Badge>}
+                              </div>
+                            )}
                           </td>
                           <td>
                             {attr?.label ?? it.attribute_code}
@@ -160,6 +213,16 @@ export function ApprovalsPage() {
         })}
       </div>
 
+      {confirmAcceptAll && (
+        <Confirm
+          title="Accept all suggestions in this run?"
+          message={`Every proposed draft of run ${shortId(runId)}${selectedRun ? ` (${selectedRun.template_code}, ${selectedRun.count} in the queue)` : ""} is approved and replaces the current values. Drafts already decided are skipped.`}
+          confirmLabel="Accept all"
+          busy={acceptAll.isPending}
+          onCancel={() => setConfirmAcceptAll(false)}
+          onConfirm={() => acceptAll.mutate()}
+        />
+      )}
       {decision && (
         <Dialog
           title={decision === "approve" ? "Approve changes" : "Reject changes"}

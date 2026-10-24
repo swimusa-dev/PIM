@@ -49,6 +49,20 @@ env:
     valueFrom: channel-export-job
   - name: DATABRICKS_JOB_ID_RENDITIONS
     valueFrom: renditions-job
+  - name: DATABRICKS_JOB_ID_AI_BULK
+    valueFrom: ai-bulk-job
+  - name: DATABRICKS_JOB_ID_AI_EVAL
+    valueFrom: ai-eval-job
+  - name: DATABRICKS_JOB_ID_QUALITY
+    valueFrom: quality-job
+  # AI-01: model per task from config; Unity Gateway endpoints with usage tracking and inference tables (D19).
+  - name: PIM_AI_ENDPOINT_COPY
+    value: "databricks-claude-sonnet-4-5"
+  - name: PIM_AI_ENDPOINT_CLASSIFY
+    value: "databricks-claude-haiku-4-5"
+  # AI-07: set to an MLflow experiment path to log evaluation runs there as well (D29).
+  - name: PIM_MLFLOW_EXPERIMENT
+    value: ""
   - name: PIM_FEATURE_IMAGE_AI_MATCH
     # IMG-03 tier 3 (Air semantic search plus vision model) stays off until PLT-00 step 8 passes.
     value: "false"

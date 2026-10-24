@@ -1,8 +1,9 @@
-// DM-02: Faceted filter builder (field, op, value) over core fields, attributes, completeness and readiness.
+// DM-02, GOV-03: Faceted filter builder (field, op, value) over core fields, attributes, completeness, readiness
+// and quality grades ("grade in").
 
 import type { FilterOp, OptionList, QueryFilter } from "../api/types";
 import type { FieldDef } from "./fields";
-import { FILTER_ONLY_FIELDS } from "./fields";
+import { FILTER_ONLY_FIELDS, QUALITY_GRADES } from "./fields";
 
 const OPS: { op: FilterOp; label: string }[] = [
   { op: "eq", label: "is" },
@@ -21,6 +22,7 @@ function opsFor(field: FieldDef | undefined): FilterOp[] {
   if (!field) return ["eq", "neq", "contains", "in", "empty", "not_empty"];
   if (field.kind === "completeness") return ["eq", "gt", "gte", "lt", "lte"];
   if (field.kind === "readiness") return ["eq", "neq"];
+  if (field.kind === "quality") return ["in", "eq", "neq"];
   const dt = field.attr?.data_type;
   if (dt === "number" || dt === "date") return ["eq", "neq", "gt", "gte", "lt", "lte", "empty", "not_empty"];
   if (dt === "boolean") return ["eq", "empty", "not_empty"];
@@ -128,6 +130,31 @@ function ValueInput({
   onChange: (v: unknown) => void;
 }) {
   const v = filter.value;
+  if (field?.kind === "quality") {
+    if (filter.op === "in") {
+      const cur = Array.isArray(v) ? (v as string[]) : [];
+      return (
+        <span className="row" style={{ gap: 6 }}>
+          {QUALITY_GRADES.map((g) => (
+            <label key={g} className="inline" title={`Grade ${g}`}>
+              <input type="checkbox" checked={cur.includes(g)} onChange={() => onChange(cur.includes(g) ? cur.filter((x) => x !== g) : [...cur, g])} />
+              <span className={`grade g${g}`}>{g}</span>
+            </label>
+          ))}
+        </span>
+      );
+    }
+    return (
+      <select value={String(v ?? "")} onChange={(e) => onChange(e.target.value)}>
+        <option value="">choose</option>
+        {QUALITY_GRADES.map((g) => (
+          <option key={g} value={g}>
+            {g}
+          </option>
+        ))}
+      </select>
+    );
+  }
   if (field?.kind === "readiness") {
     return (
       <select value={v === true ? "true" : v === false ? "false" : ""} onChange={(e) => onChange(e.target.value === "true")}>

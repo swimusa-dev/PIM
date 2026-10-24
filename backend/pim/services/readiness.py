@@ -192,6 +192,17 @@ def refresh_snapshots(session: Session, meta: Metadata, entities: list[ProductEn
             session.add(ReadinessSnapshot(entity_id=t.id, channel_code=ch.code, completeness_pct=r.completeness_pct,
                                           ready=r.ready, eligible=r.eligible, detail=r.as_dict(), computed_at=now))
     session.flush()
+    try:
+        from pim.services.quality import (
+            refresh_quality,  # GOV-03 rides the same trigger; never blocks a value write
+        )
+
+        with session.begin_nested():  # savepoint: a failed quality statement rolls back alone, the value write survives
+            refresh_quality(session, meta, targets)
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception("quality refresh failed")
 
 
 def snapshots_for(session: Session, entity_ids: list[str]) -> dict[str, dict[str, ReadinessSnapshot]]:

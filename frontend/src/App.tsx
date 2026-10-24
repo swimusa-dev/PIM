@@ -1,4 +1,4 @@
-// Route table. The FastAPI app serves index.html for every non-API path, so BrowserRouter works.
+// Route table (Phase 4 adds /ai, /ai/:tab and /ai/runs/:id for AI-04 and AI-07). The FastAPI app serves index.html for every non-API path, so BrowserRouter works.
 
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
@@ -19,6 +19,8 @@ import { WorkflowsPage } from "./pages/Workflows";
 import { ComparePage } from "./pages/Compare";
 import { ExportsPage } from "./pages/Exports";
 import { ExportDetailPage } from "./pages/ExportDetail";
+import { AiPage } from "./pages/Ai";
+import { AiRunPage } from "./pages/AiRun";
 import { Empty } from "./components/Common";
 
 export function App() {
@@ -44,6 +46,9 @@ export function App() {
         <Route path="/bulk" element={<BulkPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/compare" element={<ComparePage />} />
+        <Route path="/ai" element={<AiPage />} />
+        <Route path="/ai/runs/:id" element={<AiRunPage />} />
+        <Route path="/ai/:tab" element={<AiPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/:tab" element={<AdminPage />} />
         <Route path="/index.html" element={<Navigate to="/" replace />} />

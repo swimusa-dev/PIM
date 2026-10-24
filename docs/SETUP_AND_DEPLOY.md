@@ -161,7 +161,7 @@ databricks auth login --host https://adb-<id>.<n>.azuredatabricks.net
 scripts/deploy.sh dev
 ```
 
-The script builds the frontend into `backend/pim/static/`, validates and deploys the bundle (ten jobs and the
+The script builds the frontend into `backend/pim/static/`, validates and deploys the bundle (thirteen jobs and the
 app definition with its resources), and starts the app. The first start:
 
 - creates the schema in Lakebase if it is empty (the app runs `create_all` on startup) and loads `seeds/*.yml`
@@ -177,7 +177,7 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
 
 ## 6. First data load
 
-1. Run the bootstrap job once so Alembic applies the migrations (baseline, Phase 2 and Phase 3):
+1. Run the bootstrap job once so Alembic applies the migrations (baseline, Phases 2, 3 and 4):
    `databricks bundle run pim_bootstrap -t dev`
 2. Run the Style Master ingest: `databricks bundle run pim_style_master_ingest -t dev`, or in the app:
    **Admin > Telemetry > Run ingest now**. The run creates styles, style-colors, and SKUs, maps ERP option
@@ -272,6 +272,33 @@ stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves th
 
 ---
 
+## 8c. AI enrichment (AI-01 to AI-07) and the quality score (GOV-03)
+
+1. **Endpoints (AI-01)**: set `PIM_AI_ENDPOINT_COPY` (Sonnet class) and `PIM_AI_ENDPOINT_CLASSIFY` (Haiku class) in
+   `app.yaml` to Unity Gateway endpoints with usage tracking, rate limits and inference tables enabled (D19). The
+   app's service principal needs CAN_QUERY on both. Image extraction needs the classify endpoint to accept image
+   parts. Until an endpoint answers, Ask AI returns a clear "AI endpoint not configured" message and nothing else
+   changes.
+2. **Brand voice and templates (AI-02)**: `seeds/ai.yml` seeds the Vitamin A voice and eleven templates (one per
+   task type plus the copy set). Edit them under **Admin > AI**; a body change creates a new version and clears the
+   evaluation gate. Templates reference attributes by code and never name a field in code.
+3. **Ask AI (AI-03)**: on a product, pick a template, preview the prompt, run, then accept, edit then accept,
+   regenerate or reject with a reason. Accepting needs Approve rights on the attribute group; otherwise the
+   suggestion stays in the approval queue (DM-08). Accepted values keep the AI badge until a person edits them.
+4. **Bulk (AI-04)**: from the grid's Bulk actions choose **Run AI**, pick a template; five samples run at once.
+   Approve the samples to start the `pim_ai_bulk` job for the rest (no job bound locally: runs inline). The run page
+   and the approval queue group the results by run; **Accept all** needs Approve rights.
+5. **Evaluation (AI-07)**: under **AI > Evaluation**, build the set from approved human-written copy (50 products),
+   then run the evaluation for a template. The run is blocked when the composite score drops more than
+   `PIM_AI_EVAL_THRESHOLD` (0.05) below the last passed run, and a blocked template cannot be activated. Set
+   `PIM_MLFLOW_EXPERIMENT` to also log each run to MLflow. Run `pim_ai_eval` after every endpoint change.
+6. **Quality score (GOV-03)**: **Admin > Quality** holds the excluded groups (ERP and cost by default), enabled
+   checks, weights and grade bands. Grades show in the grid (`Quality` columns per channel), on the product page and
+   on the dashboard by family, season and channel. Scores refresh with readiness on every value change and nightly
+   through `pim_quality_score`; press **Recompute now** after changing the settings.
+
+---
+
 ## 9. Images from Air (IMG-01 to IMG-07)
 
 Set `PIM_AIR_WORKSPACE_ID` and `PIM_AIR_BOARDS` (comma-separated board ids to poll) in `app.yaml`, keep the API
@@ -309,7 +336,8 @@ databricks bundle run pim_bootstrap -t dev   # applies Alembic migrations and re
 Schema changes: edit the models, run `alembic revision --autogenerate -m "<message>"` against a local database,
 review the file in `migrations/versions/`, commit it. Phase 3 is migration `f2ec7848d5b7` (new tables
 `publish_item`, `eligibility_override`, `image_rendition`; new columns on `channel` and `publish_record` with
-server defaults so existing rows upgrade in place).
+server defaults so existing rows upgrade in place). Phase 4 is migration `3065a9ada0dc` (nine new tables for brand
+voices, templates and versions, AI runs and outputs, the evaluation set, quality settings and snapshots).
 
 ---
 

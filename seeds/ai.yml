@@ -1,0 +1,161 @@
+# AI-02 brand voice and prompt templates as managed configuration. Templates reference attributes by code
+# ({{attr.<code>}}), core fields ({{core.style_number}}), free text input ({{input.text}}) and the channel limit
+# ({{channel.max_length}}). Never hard-code attribute names in code; add or change templates here or in Admin > AI.
+brand_voices:
+  - brand_code: vitamin_a
+    label: Vitamin A
+    tone: "Warm, confident, sun-soaked, and specific. Short sentences. Sensory but never gushing. Speaks to a woman who knows what she likes."
+    do_rules:
+      - Name the fabric and how it feels on the body
+      - State fit and coverage plainly (cheeky, moderate, full)
+      - Mention the recycled content only when the fabric record carries the claim
+      - Use American English spelling
+    dont_rules:
+      - No superlatives such as best, perfect, ultimate
+      - No invented sustainability or certification claims
+      - No exclamation points
+      - Do not restate the product name more than once
+    blocked_terms: [cheap, perfect, guaranteed, flawless, ultimate, sexy]
+    trademark_terms: {ecorib: "EcoRib®", repreve: "REPREVE®", ecolux: "EcoLux®", biorib: "BioRib®"}
+    punctuation_rules:
+      - Never use the em dash character; use a comma, a period, or a colon.
+      - Use straight quotes and a single space after periods.
+    examples:
+      - "The Skylar Top is a longline bralette cut from our signature EcoRib®, a ribbed recycled fabric with a soft, matte hand. Adjustable straps and a wide underband keep it in place from first swim to last light. Moderate coverage."
+      - "Meet the Luciana Full Bottom in EcoLux®. A high-cut leg lengthens the line while full coverage keeps things easy. Fully lined, with a smooth waistband that lies flat."
+      - "Our California Hipster sits low on the hip with a clean, modern cut. Made in our matte EcoLux® fabric that holds its shape all season. Moderate coverage, fully lined."
+
+templates:
+  - code: vita_product_description
+    label: Product description (long copy)
+    task_type: generate
+    target_attribute: product_description
+    input_attributes: [erp_style_description, silhouette, neckline, strap_type, coverage, product_features, fabric.fabric_story, fabric.fabric_care, customer_color_name, erp_style_content, material_claim]
+    input_shot_types: [front, on_model_front]
+    model_task: copy
+    status: active
+    body: |
+      Write the product description for {{attr.erp_style_description}} (style {{core.style_number}}).
+      Two short paragraphs, 60 to 110 words in total, in the brand voice. Open with what the piece is and how the
+      fabric feels, then fit, coverage, and one practical detail. Use only the facts supplied. Return the copy only.
+  - code: vita_short_description
+    label: Short description
+    task_type: generate
+    target_attribute: short_description
+    input_attributes: [product_description, erp_style_description, silhouette, coverage, fabric.fabric_story]
+    model_task: copy
+    status: active
+    max_length: 300
+    body: |
+      Write a short description of at most {{channel.max_length}} characters for {{attr.erp_style_description}}.
+      One or two sentences, brand voice, facts only. Return the text only.
+  - code: vita_seo_title
+    label: SEO title
+    task_type: generate
+    target_attribute: seo_title
+    input_attributes: [product_title, erp_style_description, silhouette, customer_color_name, fabric.fabric_story]
+    model_task: copy
+    status: active
+    max_length: 70
+    body: |
+      Write an SEO title of at most {{channel.max_length}} characters for {{attr.product_title}} in {{attr.customer_color_name}}.
+      Format: "<Product name> in <Color> | Vitamin A". Return the title only.
+  - code: vita_seo_description
+    label: SEO meta description
+    task_type: generate
+    target_attribute: seo_description
+    input_attributes: [product_title, product_description, silhouette, coverage, customer_color_name]
+    model_task: copy
+    status: active
+    max_length: 160
+    body: |
+      Write an SEO meta description of at most {{channel.max_length}} characters for {{attr.product_title}}.
+      Plain, specific, no superlatives. Return the text only.
+  - code: adapt_title_targetplus
+    label: Adapt title for Target+
+    task_type: adapt
+    target_attribute: product_title
+    channel_code: targetplus
+    input_attributes: [product_title, erp_style_description, customer_color_name, silhouette]
+    model_task: copy
+    status: active
+    body: |
+      Rewrite the product title "{{attr.product_title}}" for the Target+ marketplace: at most {{channel.max_length}}
+      characters, title case, brand first ("Vitamin A"), then the product name, then the color. Keep every fact.
+      Return the title only.
+  - code: extract_from_supplier_text
+    label: Extract attributes from supplier text
+    task_type: extract
+    output_attributes: [silhouette, neckline, strap_type, coverage, product_features, lining]
+    input_attributes: [erp_style_description]
+    accepts_text_input: true
+    accepts_document: true
+    model_task: classify
+    status: active
+    body: |
+      From the supplier text below, extract values for these attributes. Return JSON only, one key per attribute
+      code, with the option code when the attribute has options (listed) or a short text otherwise. Omit anything the
+      text does not state.
+      {{options}}
+      Supplier text:
+      {{input.text}}
+  - code: extract_from_image
+    label: Extract construction details from a product photo
+    task_type: extract
+    output_attributes: [neckline, strap_type, silhouette]
+    input_shot_types: [front, on_model_front]
+    model_task: classify
+    status: active
+    body: |
+      Look at the product photo(s). Return JSON only with the option codes for neckline, strap_type and silhouette
+      that you can see with confidence, from the options listed. Omit anything you cannot see.
+      {{options}}
+  - code: classify_color_family
+    label: Classify color family
+    task_type: classify
+    target_attribute: color_family
+    input_attributes: [erp_color_description, customer_color_name]
+    model_task: classify
+    status: active
+    body: |
+      Color description: {{attr.erp_color_description}} ({{attr.customer_color_name}}). Choose the single best
+      color family from the options and return JSON only: {"code": "<option code>", "confidence": 0.0 to 1.0}.
+      {{options}}
+  - code: check_brand_voice
+    label: Check copy against the brand voice
+    task_type: check
+    target_attribute: product_description
+    input_attributes: [product_description, erp_style_content, fabric.fabric_certifications]
+    model_task: classify
+    status: active
+    body: |
+      Review this copy against the brand voice rules and the facts supplied. Report blocked terms, tone problems,
+      spelling, length above {{channel.max_length}} characters, and any material, percentage, or certification
+      claim that the facts do not support. Return JSON only: {"findings": [{"kind": "blocked_term|tone|spelling|length|claim|punctuation", "message": "...", "severity": "error|warning"}]}.
+      Copy:
+      {{attr.product_description}}
+  - code: restructure_fit_details
+    label: Restructure legacy Fit Details
+    task_type: restructure
+    output_attributes: [product_features, product_measurements, model_profile]
+    input_attributes: [fit_details]
+    model_task: classify
+    status: active
+    body: |
+      The legacy "Fit Details" field mixes product features, product measurements, and what the model wore.
+      Split it. Return JSON only: {"product_features": ["<option code>", ...] from the options listed,
+      "product_measurements": "<measurements with units, one per line>", "model_note": "<the model sentence verbatim or empty>"}.
+      {{options}}
+      Fit Details:
+      {{attr.fit_details}}
+  - code: expand_color_name
+    label: Expand ERP color to a customer-facing color name
+    task_type: expand
+    target_attribute: customer_color_name
+    input_attributes: [erp_color_description, color_family]
+    model_task: classify
+    status: active
+    body: |
+      The ERP color description is "{{attr.erp_color_description}}". Write the customer-facing color name in
+      Title Case, expanding abbreviations (FSTVL = Festival, BLK = Black, NVY = Navy, WHT = White, ECO = Eco).
+      Return the name only.

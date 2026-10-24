@@ -77,6 +77,21 @@ resources:
           job:
             id: ${resources.jobs.pim_renditions.id}
             permission: CAN_MANAGE_RUN
+        - name: ai-bulk-job
+          description: Bulk AI run (AI-04)
+          job:
+            id: ${resources.jobs.pim_ai_bulk.id}
+            permission: CAN_MANAGE_RUN
+        - name: ai-eval-job
+          description: AI evaluation set (AI-07)
+          job:
+            id: ${resources.jobs.pim_ai_eval.id}
+            permission: CAN_MANAGE_RUN
+        - name: quality-job
+          description: Data quality score (GOV-03)
+          job:
+            id: ${resources.jobs.pim_quality_score.id}
+            permission: CAN_MANAGE_RUN
         - name: bootstrap-job
           description: Alembic upgrade and seed load
           job:

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pim import __version__
 from pim.api import (
     admin,
+    ai,
     approvals,
     bulk,
     dashboard,
@@ -29,6 +30,7 @@ from pim.api import (
     metadata,
     packages,
     products,
+    quality,
     reference,
     views,
     workflows,
@@ -64,7 +66,7 @@ def create_app() -> FastAPI:
         return response
 
     for r in (health, metadata, workflows, products, views, approvals, packages, reference, dashboard, admin, imports, bulk,
-              exports, images):
+              exports, images, ai, quality):
         app.include_router(r.router)
 
     @app.on_event("startup")

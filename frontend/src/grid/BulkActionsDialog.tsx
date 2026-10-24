@@ -1,16 +1,19 @@
-// DM-04: Bulk actions dialog. Chooses the kind and params (metadata-driven pickers), previews the first
-// 20 changes and the total, runs, polls until done and shows the report.
+// DM-04, AI-04: Bulk actions dialog. Chooses the kind and params (metadata-driven pickers), previews the first
+// 20 changes and the total, runs, polls until done and shows the report. The "Run AI" kind picks an active prompt
+// template (filtered to this level's target attributes) and an optional channel, creates an AI run with the current
+// selection (POST /api/ai/runs, five samples generated synchronously) and opens the run page.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { api } from "../api/client";
-import { canEdit, useAttributes, useChannels, useFamilies, useGroups, useMe, useOptionLists, useWorkflows } from "../api/hooks";
+import { Link, useNavigate } from "react-router-dom";
+import { aiApi, api } from "../api/client";
+import { canEdit, useActiveTemplates, useAttributes, useChannels, useFamilies, useGroups, useMe, useOptionLists, useWorkflows } from "../api/hooks";
 import type { AttributeDefinition, BulkAction, BulkKind, BulkSelection, Level, OptionList, SavedView } from "../api/types";
 import { Badge, Dialog, ErrorBox, Spinner, StatusBadge } from "../components/Common";
 import { ValueEditor } from "../components/ValueEditor";
 import { attributeAppliesAtLevel } from "./fields";
 import { displayValue } from "../lib/format";
+import { TaskBadge, taskLabel } from "../ai/shared";
 
 export const BULK_KINDS: { kind: BulkKind; label: string; help: string }[] = [
   { kind: "set_value", label: "Set value", help: "Write one value to an attribute on every selected product." },
@@ -21,7 +24,7 @@ export const BULK_KINDS: { kind: BulkKind; label: string; help: string }[] = [
   { kind: "copy_attribute", label: "Copy attribute", help: "Copy the value of one attribute into another." },
   { kind: "change_family", label: "Change family", help: "Move the selected products to another family." },
   { kind: "assign_workflow", label: "Assign workflow", help: "Start a workflow for the selected products." },
-  { kind: "run_ai", label: "Run AI", help: "Generate a value with an AI task; results land as drafts." },
+  { kind: "run_ai", label: "Run AI", help: "Run a prompt template on the selection; five samples first, then the rest. Results land as suggestions." },
   { kind: "send_for_approval", label: "Send for approval", help: "Submit the pending drafts on the selected products." },
 ];
 
@@ -95,6 +98,8 @@ export function BulkActionsDialog({
   const families = useFamilies();
   const channels = useChannels();
   const workflows = useWorkflows();
+  const navigate = useNavigate();
+  const aiTemplates = useActiveTemplates();
 
   const [scope, setScope] = useState<"rows" | "view">(entityIds.length > 0 ? "rows" : "view");
   const [kind, setKind] = useState<BulkKind>("set_value");
@@ -123,6 +128,32 @@ export function BulkActionsDialog({
   }, [editable]);
 
   const selection: BulkSelection = scope === "view" && view ? { view_id: view.id, level } : { entity_ids: entityIds, level };
+
+  // AI-04: active templates whose target (or any output attribute) lives at this level. Templates without any
+  // target cannot be filtered and stay listed.
+  const levelAttrCodes = useMemo(() => new Set((attrs.data ?? []).filter((a) => a.level === level).map((a) => a.code)), [attrs.data, level]);
+  const aiTemplateOptions = useMemo(
+    () =>
+      (aiTemplates.data ?? []).filter((t) => {
+        const codes = t.output_attributes.length ? t.output_attributes : t.target_attribute ? [t.target_attribute] : [];
+        return codes.length === 0 || codes.some((c) => levelAttrCodes.has(c));
+      }),
+    [aiTemplates.data, levelAttrCodes],
+  );
+  const aiTemplate = typeof params.template_code === "string" ? aiTemplateOptions.find((t) => t.code === params.template_code) : undefined;
+  const aiRun = useMutation({
+    mutationFn: () =>
+      aiApi.createRun({
+        template_code: aiTemplate!.code,
+        selection: scope === "view" && view ? { view_id: view.id } : { entity_ids: entityIds },
+        channel_code: (typeof params.channel_code === "string" && params.channel_code) || aiTemplate?.channel_code || undefined,
+      }),
+    onSuccess: (run) => {
+      onDone?.();
+      onClose();
+      navigate(`/ai/runs/${encodeURIComponent(run.id)}`);
+    },
+  });
 
   const previewM = useMutation({
     mutationFn: () => api.bulk.preview({ kind, selection, params }),
@@ -172,7 +203,7 @@ export function BulkActionsDialog({
       case "assign_workflow":
         return !!params.workflow_code;
       case "run_ai":
-        return !!params.task_type && !!params.target_attribute;
+        return !!aiTemplate;
       case "send_for_approval":
         return true;
     }
@@ -237,7 +268,12 @@ export function BulkActionsDialog({
               <button onClick={onClose} disabled={runM.isPending || (!!runId && !done)}>
                 Cancel
               </button>
-              {!preview && (
+              {kind === "run_ai" && (
+                <button className="primary" disabled={!valid || !hasSelection || aiRun.isPending} onClick={() => aiRun.mutate()}>
+                  {aiRun.isPending ? "Generating samples" : "Run AI (samples first)"}
+                </button>
+              )}
+              {!preview && kind !== "run_ai" && (
                 <button className="primary" disabled={!valid || !hasSelection || previewM.isPending} onClick={() => previewM.mutate()}>
                   {previewM.isPending ? "Previewing" : "Preview"}
                 </button>
@@ -419,19 +455,58 @@ export function BulkActionsDialog({
                 </label>
               )}
               {kind === "run_ai" && (
-                <div className="form-grid">
-                  <label className="field">
-                    Task type
-                    <input value={typeof params.task_type === "string" ? (params.task_type as string) : ""} placeholder="e.g. describe, translate" onChange={(e) => setParam("task_type", e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Target attribute
-                    {attrPicker("target_attribute")}
-                  </label>
-                  <label className="field">
-                    Prompt template (optional)
-                    <input value={typeof params.template_code === "string" ? (params.template_code as string) : ""} onChange={(e) => setParam("template_code", e.target.value || undefined)} />
-                  </label>
+                <div className="stack">
+                  {aiTemplates.isLoading && <Spinner label="Loading templates" />}
+                  {aiTemplates.isError && <ErrorBox error={aiTemplates.error} title="Could not load prompt templates" />}
+                  {aiTemplates.data && aiTemplateOptions.length === 0 && (
+                    <div className="banner warn boxed">No active prompt template targets an attribute at the {level} level. Create or activate one under Admin, AI.</div>
+                  )}
+                  <div className="form-grid">
+                    <label className="field">
+                      Prompt template
+                      <select value={aiTemplate?.code ?? ""} onChange={(e) => { setParam("template_code", e.target.value); setParam("channel_code", undefined); }}>
+                        <option value="">Choose a template</option>
+                        {aiTemplateOptions.map((t) => {
+                          const target = t.output_attributes.length ? t.output_attributes : t.target_attribute ? [t.target_attribute] : [];
+                          const labels = target.map((c) => attrs.data?.find((a) => a.code === c)?.label ?? c);
+                          return (
+                            <option key={t.code} value={t.code}>
+                              {t.label} ({taskLabel(t.task_type)}{labels.length ? `, ${labels.join(", ")}` : ""})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                    <label className="field">
+                      Channel (optional)
+                      <select
+                        value={typeof params.channel_code === "string" ? (params.channel_code as string) : (aiTemplate?.channel_code ?? "")}
+                        disabled={!!aiTemplate?.channel_code}
+                        onChange={(e) => setParam("channel_code", e.target.value || undefined)}
+                      >
+                        <option value="">{aiTemplate?.task_type === "adapt" ? "Choose a channel" : "Global value"}</option>
+                        {(channels.data ?? []).map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {aiTemplate && (
+                    <div className="small row" style={{ gap: 6 }}>
+                      <TaskBadge task={aiTemplate.task_type} />
+                      <span className="mono faint">
+                        {aiTemplate.code} v{aiTemplate.version}
+                      </span>
+                      {aiTemplate.eval_gate?.blocked && <Badge color="red">eval gate blocked</Badge>}
+                    </div>
+                  )}
+                  <div className="help">
+                    The first five products are generated right away as samples. You review them on the run page, then approve to run the rest as a
+                    job. Every result is a suggestion a person accepts or rejects.
+                  </div>
+                  {aiRun.isError && <ErrorBox error={aiRun.error} title="Could not start the AI run" />}
                 </div>
               )}
               {kind === "send_for_approval" && <div className="muted small">Pending drafts on the selected products are submitted to their approvers.</div>}

@@ -33,10 +33,11 @@ src/
   api/        types.ts (contract interfaces), client.ts (typed fetch for every endpoint), hooks.ts (metadata hooks)
   components/ AppShell, NotificationBell, Common (Spinner, ErrorBox, Dialog, badges), ValueEditor (editors by data_type)
   grid/       product grid pieces: field catalog, filter builder, column chooser, saved views, edit batching, bulk actions dialog
-  detail/     product detail pieces: tree, attribute form, images, history, comments, workflow panel, carryover
+  detail/     product detail pieces: tree, attribute form, images, history, comments, workflow panel, carryover, Ask AI panel, quality panel
   imports/    import wizard steps: shared helpers, Upload, Map (with value mappings and templates), Validate, Match, Review
   workflows/  workflow item actions (advance, reject, assign) shared by My Work and the detail panel
-  admin/      admin tabs (including Rules); admin/channel/ holds the per-channel editor tabs (schema, mapping, image profile, schedule, health)
+  admin/      admin tabs (including Rules, AI with BrandVoices and PromptTemplates, Quality); admin/channel/ holds the per-channel editor tabs
+  ai/         Phase 4 AI pieces shared by several screens: shared.tsx (task labels, status pills, diff view, 409 banner), OutputCard (review card), Evaluation tab
   exports/    pieces shared by the Exports pages: status pills, Dry run / Publish dialog, delta preview
   pages/      one file per route, each headed with the requirement IDs it implements
   lib/        format, validation, tsv helpers
@@ -48,14 +49,14 @@ src/
 |---|---|---|
 | `/` | Home dashboard | DM-10 |
 | `/products` | Product grid with saved views and in-grid editing | DM-01, DM-02, DM-03, EXP-03 |
-| `/products/:id` | Product detail | DM-01, DM-05, DM-06, DM-11, IMG-05, GOV-02 |
+| `/products/:id` | Product detail (Phase 4: Ask AI tab, Quality section, `?attr=<code>` focuses an attribute row) | DM-01, DM-05, DM-06, DM-11, IMG-05, GOV-02, GOV-03, AI-03, AI-05, AI-06 |
 | `/reference/:type`, `/reference/:type/:id` | Reference entities | DM-11 |
-| `/approvals` | Approval queue | DM-08 |
+| `/approvals` | Approval queue (Phase 4: Run filter, run and template chips, Accept all in run) | DM-08, AI-04 |
 | `/packages`, `/packages/:id` | Shopify update packages | EXP-13 |
 | `/exports` | Exports: channel picker, Dry run, Publish, Delta preview, publish history with channel and kind filters | EXP-04, EXP-05, EXP-06 |
 | `/exports/:id` | Publish detail: summary, payload preview, files, items with issues and errors, retailer feedback upload or adapter poll, package link | EXP-04, EXP-05, EXP-13 |
 | `/images` | Image review queues: candidates, missing shots, unparsed (with Ask AI for candidates), failing rules per channel | IMG-03, IMG-05 |
-| `/admin/:tab` | Metadata, roles, rules, reports, telemetry | 1.3, RBAC, IMP-11, GOV-01, GOV-04, GOV-07 |
+| `/admin/:tab` | Metadata, roles, rules, AI (brand voice, prompt templates), quality settings and dashboard, reports, telemetry | 1.3, RBAC, IMP-11, GOV-01, GOV-03, GOV-04, GOV-07, AI-02 |
 | `/admin/channels` | Channel list; each row expands into Target schema, Mapping, Image profile, Schedule and Health tabs | EXP-01, EXP-02, EXP-05, EXP-06, IMG-07 |
 | `/admin/rules` | Rules engine: list, editor, preview on samples, activate, run now, runs | GOV-01, GOV-06 |
 | `/imports` | Import history, mapping templates, import sources | IMP-07, IMP-02, IMP-01 |
@@ -64,6 +65,8 @@ src/
 | `/bulk` | Bulk action history with reports and rollback (the dialog lives on `/products`) | DM-04 |
 | `/workflows` | My Work: Mine / My role / All, Manager, Admin definitions | DM-07 |
 | `/compare?a=&b=&channel=` | Compare two products, copy values across | DM-06 |
+| `/ai`, `/ai/:tab` | AI page: Runs, Outputs, Metrics, Evaluation (eval cases and eval runs) | AI-04, AI-07 |
+| `/ai/runs/:id` | Bulk AI run: header and progress, sample review cards, approve samples, cancel, outputs table, Accept all | AI-04 |
 
 Phase 2 additions on existing pages: the product grid has a selection checkbox column and a Bulk actions button
 (DM-04); the product detail page has a Comments tab (DM-09), a Workflow panel (DM-07), a Carryover action for
@@ -118,6 +121,56 @@ and `eligibilityApi` (plus `api.images.*` and `api.metadata.shotTypes`); the int
 - `GET /api/publishes/{id}/items` paging assumes 100 rows per page for the Next button; the first page is taken from
   the detail response's `items` until a status filter is set.
 - `GET /api/channels/{code}/schema/diff` may 404 before the first refresh; the error is ignored.
+
+## Phase 4 additions
+
+Built to `docs/api-contract-phase4.md`. The client lives in `src/api/client.ts` as `aiApi` and `qualityApi`
+(plus `api.approvals.queue(group, runId)`); the interfaces are appended to `src/api/types.ts`. Every AI result is an
+`AiOutput` reviewed by a person: nothing on these screens writes a product value directly.
+
+- Product detail: an Ask AI tab (hidden without the `run_ai` permission; admins pass) lists the product's applicable
+  templates grouped by task type, takes a channel for adapt, free text, a document (base64) and confirmed image
+  picks for extract, previews the rendered prompt with missing inputs, and shows each output as a review card
+  (current versus proposed, word-level diff, grounding errors, NEEDS_INPUT chips that focus the attribute row,
+  confidence for classify, check findings; Accept, Edit then accept, Regenerate, Reject with quick reasons). The
+  readiness panel ends with the Quality section (GOV-03) listing each score's checks per channel.
+- Product grid: `quality:overall` (in the default columns) and `quality:<channel>` computed columns render a grade
+  pill with the score as tooltip; they sort, and the filter builder offers "is one of" over the grades A to E.
+- Bulk actions > Run AI: picks an active template filtered to the grid level's target attributes plus an optional
+  channel, calls `POST /api/ai/runs` with the current selection and opens `/ai/runs/{id}`.
+- Approvals: Run filter from the response's `runs`, run and template chips on items, "Accept all in run" for users
+  whose data rights give approve on every group the run writes (the server checks again).
+- Admin > AI: Brand voice cards (tone, do and don't rules, blocked terms, trademark terms as key / value rows,
+  punctuation rules, 5 to 10 examples, version shown; PUT bumps the version) and the Prompt templates manager
+  (table, create and edit dialog with the placeholder helper, grouped input attributes, shot types, output
+  attributes for extract and restructure, model task, max length; Preview on a product by entity id or style
+  number search; Activate with the 409 eval-gate message; version history).
+- Admin > Quality: settings (excluded groups, enabled checks and weights, grade bands), Recompute now, and the
+  dashboard by family, season or channel with stacked grade bars and the average score. Home shows the family
+  dashboard as a compact card.
+
+### Phase 4 contract assumptions
+
+- `GET /api/products/{id}/ai/templates` is "grouped by task type" in the contract; the client accepts a flat
+  `PromptTemplate[]`, a `{task_type: PromptTemplate[]}` map or `{templates: PromptTemplate[]}` and groups client side.
+- `GET /api/ai/outputs` also accepts `template_code=` (the Outputs tab filter); the backend may ignore it. List
+  endpoints (`/api/ai/outputs`, `/api/ai/runs`) are assumed to page 50 rows; the Next button appears while a page
+  is full.
+- `POST /api/ai/runs` is expected to return the AiRun with `outputs` (the five samples); the run page re-reads the
+  run and takes samples from `sample_entity_ids`, falling back to the first five outputs.
+- "Accept all" on the run page checks approve rights against the attribute codes seen in the run's outputs; before
+  any output exists the button stays disabled.
+- Template create and update send the PromptTemplate fields without version, status and timestamps; update also
+  sends `note` for the version history and `status: "retired"` for the Retire action.
+- `PUT /api/ai/brand-voices/{code}` on an unknown code is used to create a brand voice (there is no POST in the
+  contract).
+- Quality settings: the checks list is the union of `weights` keys and `enabled_checks`; new check codes can be
+  typed in and are sent with weight 1.
+- Template preview search uses `POST /api/products/query` with a `style_number contains` filter at the target
+  attribute's level (style-color when unknown).
+- The `run_ai` permission is read from `/api/me` `permissions`; admins (`admin_metadata`) always see the AI screens.
+- Rejecting from the run page's outputs table sends the fixed reason "Rejected from the run page"; the card view
+  asks for a reason.
 
 ## Grid keyboard reference (DM-03)
 

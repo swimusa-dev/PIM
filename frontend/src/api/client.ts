@@ -1,5 +1,5 @@
-// Typed fetch helpers for every endpoint in docs/api-contract.md, docs/api-contract-phase2.md and
-// docs/api-contract-phase3.md.
+// Typed fetch helpers for every endpoint in docs/api-contract.md, docs/api-contract-phase2.md,
+// docs/api-contract-phase3.md and docs/api-contract-phase4.md (AI-01 to AI-07, GOV-03 at the end of the file).
 // All calls go through `request` so errors surface the server's `{detail}` message.
 
 import type {
@@ -87,6 +87,25 @@ import type {
   SchemaDiff,
   ShotType,
   TargetSchema,
+  AiAskRequest,
+  AiMetrics,
+  AiOutput,
+  AiOutputList,
+  AiRun,
+  AiRunCreate,
+  AiRunDetail,
+  AiRunList,
+  BrandVoice,
+  EvalCase,
+  EvalRun,
+  PromptTemplate,
+  PromptTemplateDetail,
+  PromptTemplateInput,
+  QualityDashboardBy,
+  QualityDashboardRow,
+  QualityScore,
+  QualitySettings,
+  TemplatePreview,
 } from "./types";
 
 export class ApiError extends Error {
@@ -214,7 +233,8 @@ export const api = {
 
   // ---- Approvals (DM-08) ----
   approvals: {
-    queue: (group?: string) => get<ApprovalQueue>(`/api/approvals${qs({ group })}`),
+    // Phase 4 (AI-04): `run_id` narrows the queue to one AI run; the response adds `runs`.
+    queue: (group?: string, runId?: string) => get<ApprovalQueue>(`/api/approvals${qs({ group, run_id: runId })}`),
     decide: (draftIds: string[], decision: "approve" | "reject", comment?: string) =>
       post<{ decided?: number; [k: string]: unknown }>("/api/approvals/decide", {
         draft_ids: draftIds,
@@ -486,6 +506,69 @@ export const eligibilityApi = {
   override: (entityId: string, body: { channel_code: string; reason: string; expires_at?: string }) =>
     post<EligibilityOverride>(`/api/products/${encodeURIComponent(entityId)}/eligibility-override`, body),
   removeOverride: (id: string) => del<void>(`/api/eligibility-overrides/${encodeURIComponent(id)}`),
+};
+
+// =================================================================================
+// Phase 4
+// =================================================================================
+
+// ---- Brand voice, prompt templates, Ask AI, review, bulk runs, metrics, evaluation (AI-01 to AI-07) ----
+export const aiApi = {
+  brandVoices: () => get<BrandVoice[]>("/api/ai/brand-voices"),
+  brandVoice: (brandCode: string) => get<BrandVoice>(`/api/ai/brand-voices/${encodeURIComponent(brandCode)}`),
+  saveBrandVoice: (brandCode: string, body: Omit<BrandVoice, "version" | "updated_at" | "updated_by">) =>
+    put<BrandVoice>(`/api/ai/brand-voices/${encodeURIComponent(brandCode)}`, body),
+
+  templates: (params: { task_type?: string; target?: string; status?: string } = {}) =>
+    get<PromptTemplate[]>(`/api/ai/templates${qs(params)}`),
+  createTemplate: (body: PromptTemplateInput) => post<PromptTemplate>("/api/ai/templates", body),
+  template: (code: string) => get<PromptTemplateDetail>(`/api/ai/templates/${encodeURIComponent(code)}`),
+  updateTemplate: (code: string, body: Partial<PromptTemplateInput>) =>
+    put<PromptTemplate>(`/api/ai/templates/${encodeURIComponent(code)}`, body),
+  // 409 when the eval gate blocks the activation (callers check ApiError.status).
+  activateTemplate: (code: string) => post<PromptTemplate>(`/api/ai/templates/${encodeURIComponent(code)}/activate`),
+  previewTemplate: (code: string, body: { entity_id: string; channel_code?: string; text?: string }) =>
+    post<TemplatePreview>(`/api/ai/templates/${encodeURIComponent(code)}/preview`, body),
+
+  // Templates applicable to one product. The contract says "grouped by task type"; the client accepts a flat
+  // array, a {task_type: PromptTemplate[]} map or {templates: PromptTemplate[]} and flattens (see hooks.ts).
+  productTemplates: (entityId: string, attribute?: string) =>
+    get<PromptTemplate[] | Record<string, PromptTemplate[]> | { templates: PromptTemplate[] }>(
+      `/api/products/${encodeURIComponent(entityId)}/ai/templates${qs({ attribute })}`,
+    ),
+  // 409 when the AI endpoint is not configured (AI-01).
+  ask: (body: AiAskRequest) => post<{ outputs: AiOutput[] }>("/api/ai/ask", body),
+  outputs: (params: { entity_id?: string; run_id?: string; status?: string; template_code?: string; page?: number } = {}) =>
+    get<AiOutputList>(`/api/ai/outputs${qs(params)}`),
+  accept: (id: string, value?: unknown) =>
+    post<AiOutput>(`/api/ai/outputs/${encodeURIComponent(id)}/accept`, value === undefined ? {} : { value }),
+  reject: (id: string, reason: string) => post<AiOutput>(`/api/ai/outputs/${encodeURIComponent(id)}/reject`, { reason }),
+  regenerate: (id: string, note?: string) =>
+    post<AiOutput>(`/api/ai/outputs/${encodeURIComponent(id)}/regenerate`, { note: note || undefined }),
+
+  createRun: (body: AiRunCreate) => post<AiRunDetail>("/api/ai/runs", body),
+  runs: (params: { status?: string; page?: number } = {}) => get<AiRunList>(`/api/ai/runs${qs(params)}`),
+  run: (id: string) => get<AiRunDetail>(`/api/ai/runs/${encodeURIComponent(id)}`),
+  approveSamples: (id: string) => post<AiRun>(`/api/ai/runs/${encodeURIComponent(id)}/approve-samples`),
+  cancelRun: (id: string) => post<AiRun>(`/api/ai/runs/${encodeURIComponent(id)}/cancel`),
+  acceptAll: (id: string) => post<{ accepted: number; skipped: number }>(`/api/ai/runs/${encodeURIComponent(id)}/accept-all`),
+
+  metrics: (templateCode?: string) => get<AiMetrics[]>(`/api/ai/metrics${qs({ template_code: templateCode })}`),
+  evalCases: (attribute?: string) => get<EvalCase[]>(`/api/ai/eval/cases${qs({ attribute })}`),
+  buildEvalCases: (attributeCode: string, limit = 50) =>
+    post<{ created: number; total: number }>("/api/ai/eval/cases/build", { attribute_code: attributeCode, limit }),
+  deleteEvalCase: (id: string) => del<void>(`/api/ai/eval/cases/${encodeURIComponent(id)}`),
+  evalRuns: (templateCode?: string) => get<EvalRun[]>(`/api/ai/eval/runs${qs({ template_code: templateCode })}`),
+  runEval: (templateCode: string) => post<EvalRun>("/api/ai/eval/runs", { template_code: templateCode }),
+};
+
+// ---- Quality score (GOV-03) ----
+export const qualityApi = {
+  settings: () => get<QualitySettings>("/api/quality/settings"),
+  saveSettings: (body: QualitySettings) => put<QualitySettings>("/api/quality/settings", body),
+  recompute: (entityIds?: string[]) => post<{ computed: number }>("/api/quality/recompute", entityIds ? { entity_ids: entityIds } : {}),
+  product: (entityId: string) => get<{ scores: QualityScore[] }>(`/api/products/${encodeURIComponent(entityId)}/quality`),
+  dashboard: (by: QualityDashboardBy) => get<{ rows: QualityDashboardRow[] }>(`/api/quality/dashboard${qs({ by })}`),
 };
 
 export function errorMessage(err: unknown): string {

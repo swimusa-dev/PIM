@@ -1,6 +1,7 @@
-// DM-01, DM-02, DM-03, DM-04, EXP-03: Product grid with level switcher, search, faceted filters, column chooser,
+// DM-01, DM-02, DM-03, DM-04, EXP-03, GOV-03: Product grid with level switcher, search, faceted filters, column chooser,
 // multi-column sort, server-side paging (100 rows), virtualized rows, saved views, spreadsheet-style
-// in-grid editing (navigation, copy/paste of TSV ranges, fill-down, undo), row selection and bulk actions.
+// in-grid editing (navigation, copy/paste of TSV ranges, fill-down, undo), row selection and bulk actions, and the
+// quality grade columns (overall and per channel).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -15,9 +16,9 @@ import {
 import { api } from "../api/client";
 import { canEdit, useAttributes, useChannels, useGroups, useMe, useOptionLists } from "../api/hooks";
 import type { Level, OptionList, ProductQuery, ProductRow, QueryFilter, QuerySort, SavedView, ViewDefinition } from "../api/types";
-import { AiBadge, ErrorBox, LifecycleBadge, LockIcon, PercentPill, Provenance, ReadinessPill, Spinner, Empty, useToast } from "../components/Common";
+import { AiBadge, ErrorBox, GradePill, LifecycleBadge, LockIcon, PercentPill, Provenance, ReadinessPill, Spinner, Empty, useToast } from "../components/Common";
 import { ValueEditor } from "../components/ValueEditor";
-import { buildFieldCatalog, coreValue, defaultColumns, type FieldDef } from "../grid/fields";
+import { buildFieldCatalog, coreValue, defaultColumns, qualityOf, type FieldDef } from "../grid/fields";
 import { FilterBuilder, describeFilter } from "../grid/FilterBuilder";
 import { ColumnChooser } from "../grid/ColumnChooser";
 import { ViewsMenu } from "../grid/ViewsMenu";
@@ -307,7 +308,8 @@ export function ProductGridPage() {
         else if (f.kind === "readiness") {
           const rd = row.readiness[f.channelCode!];
           line.push(!rd ? "" : !rd.eligible ? "Ineligible" : rd.ready ? "Ready" : "Not ready");
-        } else line.push(clipboardValue(cellValue(row.values[f.attr!.code])));
+        } else if (f.kind === "quality") line.push(qualityOf(row, f)?.grade ?? "");
+        else line.push(clipboardValue(cellValue(row.values[f.attr!.code])));
       }
       block.push(line);
     }
@@ -544,6 +546,10 @@ export function ProductGridPage() {
     }
     if (field.kind === "completeness") return <PercentPill value={row.completeness[field.channelCode!]} />;
     if (field.kind === "readiness") return <ReadinessPill readiness={row.readiness[field.channelCode!]} />;
+    if (field.kind === "quality") {
+      const qc = qualityOf(row, field);
+      return <GradePill grade={qc?.grade} score={qc?.score} />;
+    }
     const a = field.attr!;
     const cell = row.values[a.code];
     const isEditingHere = editing && editing.r === pos.r && editing.c === pos.c;
@@ -803,7 +809,7 @@ export function ProductGridPage() {
                           }}
                           onDoubleClick={() => {
                             if (editable) startEdit(pos);
-                            else if (f.kind === "core" || f.kind === "completeness" || f.kind === "readiness") navigate(`/products/${encodeURIComponent(row.entity_id)}`);
+                            else if (f.kind === "core" || f.kind === "completeness" || f.kind === "readiness" || f.kind === "quality") navigate(`/products/${encodeURIComponent(row.entity_id)}`);
                           }}
                         >
                           {renderCell(row, f, pos)}

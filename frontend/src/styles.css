@@ -1715,3 +1715,342 @@ table.data tr.expanded-row > td {
   padding-left: 16px;
   color: var(--text-muted);
 }
+
+/* ---------- Phase 4: AI enrichment (AI-03 to AI-07) ---------- */
+.ask-ai {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.ask-ai-templates {
+  max-height: 75vh;
+  overflow: auto;
+}
+.ask-ai-group-head {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.ask-ai-template {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.ask-ai-template:hover {
+  background: var(--teal-faint);
+}
+.ask-ai-template.selected {
+  background: var(--teal-light);
+  border-left-color: var(--teal);
+}
+.ask-ai-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-ai-image {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  background: var(--surface);
+}
+.ask-ai-image.on {
+  border-color: var(--teal);
+  background: var(--teal-faint);
+}
+.ask-ai-image img,
+.ask-ai-image .thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.ai-prompt {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow: auto;
+}
+.ai-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow);
+}
+.ai-card.status-proposed {
+  border-left-color: var(--amber);
+}
+.ai-card.status-accepted,
+.ai-card.status-edited {
+  border-left-color: var(--green);
+}
+.ai-card.status-rejected,
+.ai-card.status-failed {
+  border-left-color: var(--red);
+}
+.ai-card.status-needs_input {
+  border-left-color: var(--purple);
+}
+.ai-card.status-info {
+  border-left-color: var(--blue);
+}
+.ai-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ai-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.ai-values > div {
+  min-width: 0;
+}
+.ai-values textarea {
+  width: 100%;
+  min-height: 120px;
+}
+.ai-diff ins {
+  background: var(--green-bg);
+  color: var(--green);
+  text-decoration: none;
+  border-radius: 2px;
+}
+.ai-diff del {
+  background: var(--red-bg);
+  color: var(--red);
+  text-decoration: line-through;
+  border-radius: 2px;
+}
+.ai-diff-wrap summary {
+  cursor: pointer;
+}
+.ai-issues {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ai-actions {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.chip-btn {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--purple);
+  background: var(--purple-bg);
+  color: var(--purple);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.chip-btn:hover {
+  background: var(--purple);
+  color: #fff;
+}
+.findings {
+  margin: 0;
+  padding-left: 16px;
+}
+.findings li {
+  margin: 2px 0;
+}
+.run-kv dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.run-kv .bar {
+  width: 240px;
+  display: inline-flex;
+}
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+.reason-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+}
+.reason-row .bar {
+  height: 10px;
+}
+.reason-row .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 16px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.check-group-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.attr-row.flash {
+  animation: attr-flash 2s ease-out;
+}
+@keyframes attr-flash {
+  0% {
+    background: var(--teal-light);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ---------- Phase 4: quality score (GOV-03) ---------- */
+.grade {
+  display: inline-block;
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  cursor: default;
+}
+.grade.gA,
+.bar .seg.gA,
+.legend i.gA {
+  background: var(--green);
+  color: #fff;
+}
+.grade.gB,
+.bar .seg.gB,
+.legend i.gB {
+  background: var(--teal);
+  color: #fff;
+}
+.grade.gC,
+.bar .seg.gC,
+.legend i.gC {
+  background: var(--blue);
+  color: #fff;
+}
+.grade.gD,
+.bar .seg.gD,
+.legend i.gD {
+  background: var(--amber);
+  color: #fff;
+}
+.grade.gE,
+.bar .seg.gE,
+.legend i.gE {
+  background: var(--red);
+  color: #fff;
+}
+.grade-bar {
+  min-width: 120px;
+}
+.grade-bar.empty-bar {
+  border: 1px dashed var(--border);
+}
+.grade-bar .seg {
+  display: inline-block;
+}
+.quality-block summary {
+  cursor: pointer;
+  list-style: none;
+}
+.quality-block summary::-webkit-details-marker {
+  display: none;
+}
+.checks {
+  margin: 6px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+.checks li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.checks li:last-child {
+  border-bottom: 0;
+}
+.checks .mark {
+  flex: 0 0 24px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 10px;
+  line-height: 18px;
+  height: 18px;
+}
+.checks li.failed .mark {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.checks li.passed .mark {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.checks li.passed {
+  color: var(--text-muted);
+}

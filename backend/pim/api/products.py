@@ -65,6 +65,9 @@ def _row(session: Session, meta: Metadata, user: CurrentUser, ent: ProductEntity
         for chan, s in snapshots_for(session, [target.id]).get(target.id, {}).items():
             row["completeness"][chan] = s.completeness_pct
             row["readiness"][chan] = s.detail
+        from pim.services.quality import scores_for  # GOV-03
+
+        row["quality"] = {("overall" if c == "" else c): {"grade": q.grade, "score": q.score} for c, q in scores_for(session, [target.id]).get(target.id, {}).items()}
     return row
 
 

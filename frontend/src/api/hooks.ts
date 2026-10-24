@@ -1,9 +1,9 @@
-// Shared react-query hooks for metadata and identity. Metadata is cached for the session
+// Shared react-query hooks for metadata and identity (Phase 4: AI-03, AI-04, GOV-03 helpers at the end). Metadata is cached for the session
 // because every screen renders from it (P5).
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "./client";
-import type { AttributeDefinition, DataRight, Me } from "./types";
+import { aiApi, api } from "./client";
+import type { AttributeDefinition, DataRight, Me, PromptTemplate } from "./types";
 
 const METADATA_STALE = 5 * 60 * 1000;
 
@@ -94,4 +94,38 @@ export function channelRight(me: Me | undefined, channelCode: string, right: "ru
   if (isAdmin(me)) return true;
   const r = me.channel_rights?.[channelCode] ?? me.channel_rights?.["*"];
   return !!r?.[right];
+}
+
+// ---- Phase 4 shared hooks (AI-03, AI-04, GOV-03) ----
+/** `run_ai` permission from /api/me; admins pass as everywhere else. */
+export function canRunAi(me: Me | undefined): boolean {
+  if (!me) return false;
+  return me.permissions.includes("run_ai") || isAdmin(me);
+}
+
+/** Approve right on an attribute's group ("*" wildcard applies). */
+export function canApprove(me: Me | undefined, attr: AttributeDefinition | undefined): boolean {
+  return rightFor(me, attr) === "approve";
+}
+
+/** Flattens GET /api/products/{id}/ai/templates whether it returns an array, a task-type map or {templates}. */
+export function flattenTemplates(
+  data: PromptTemplate[] | Record<string, PromptTemplate[]> | { templates: PromptTemplate[] } | undefined,
+): PromptTemplate[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if ("templates" in data && Array.isArray((data as { templates: PromptTemplate[] }).templates)) {
+    return (data as { templates: PromptTemplate[] }).templates;
+  }
+  const out: PromptTemplate[] = [];
+  for (const v of Object.values(data as Record<string, PromptTemplate[]>)) if (Array.isArray(v)) out.push(...v);
+  return out;
+}
+
+export function useActiveTemplates() {
+  return useQuery({ queryKey: ["ai", "templates", { status: "active" }], queryFn: () => aiApi.templates({ status: "active" }), staleTime: 60_000 });
+}
+
+export function useBrandVoices() {
+  return useQuery({ queryKey: ["ai", "brand-voices"], queryFn: aiApi.brandVoices, staleTime: METADATA_STALE });
 }

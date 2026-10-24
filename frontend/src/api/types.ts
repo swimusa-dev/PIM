@@ -1,4 +1,5 @@
-// Interfaces copied from docs/api-contract.md (PIM API contract v1).
+// Interfaces copied from docs/api-contract.md (PIM API contract v1) plus the Phase 2, 3 and 4 additions
+// (AI-01 to AI-07 and GOV-03 at the end of the file).
 // Keep these in sync with the backend; the frontend builds exactly to this contract.
 
 export type Level = "style" | "style_color" | "sku";
@@ -140,6 +141,8 @@ export interface ProductRow {
   values: Record<string, ValueCell>;
   completeness: Record<string, number>; // channel_code -> percent 0..100
   readiness: Record<string, Readiness>;
+  // Phase 4 (GOV-03): quality grade and score per channel; "" is the overall score. Absent before the first recompute.
+  quality?: Record<string, QualityCell>;
 }
 
 export interface ImageLink {
@@ -370,10 +373,15 @@ export interface ApprovalItem {
   proposed: unknown;
   set_at: string;
   draft_id: string;
+  // Phase 4 (AI-04): set when the draft came from an AI run.
+  run_id?: string | null;
+  ai_output_id?: string | null;
 }
 
 export interface ApprovalQueue {
   groups: { submitter: string; items: ApprovalItem[] }[];
+  // Phase 4 (AI-04): runs with drafts in the queue, for the Run filter.
+  runs?: ApprovalRunSummary[];
 }
 
 export type PackageStatus = "pending" | "building" | "ready" | "failed" | "reconciled";
@@ -1288,4 +1296,273 @@ export interface ImageQueueFailingRules extends ImageLink {
   label?: string | null;
   entity_label?: string | null;
   reasons?: string[];
+}
+
+// =================================================================================
+// Phase 4: AI enrichment and quality score (docs/api-contract-phase4.md)
+// AI-01 to AI-07, GOV-03
+// =================================================================================
+
+export type TaskType = "generate" | "adapt" | "extract" | "classify" | "check" | "restructure" | "expand";
+
+export interface BrandVoice {
+  brand_code: string;
+  label: string;
+  tone: string;
+  do_rules: string[];
+  dont_rules: string[];
+  blocked_terms: string[];
+  trademark_terms: Record<string, string>;
+  punctuation_rules: string[];
+  examples: string[];
+  version: number;
+  updated_at: string;
+  updated_by?: string | null;
+}
+
+export type TemplateStatus = "draft" | "active" | "retired";
+export type ModelTask = "copy" | "classify";
+
+export interface PromptTemplate {
+  code: string;
+  version: number;
+  label: string;
+  task_type: TaskType;
+  target_attribute?: string | null;
+  // extract / restructure write several attributes; classify targets a select attribute; check targets any text attribute
+  output_attributes: string[];
+  channel_code?: string | null;
+  family_code?: string | null;
+  brand_code: string;
+  body: string; // uses {{attr.<code>}}, {{core.<field>}}, {{input.text}}, {{channel.max_length}}
+  input_attributes: string[];
+  input_shot_types: string[];
+  accepts_text_input: boolean;
+  accepts_document: boolean;
+  max_length?: number | null; // null = from the attribute definition and channel requirement
+  model_task: ModelTask; // which configured endpoint (AI-01)
+  status: TemplateStatus;
+  updated_at: string;
+  updated_by?: string | null;
+  eval_gate?: { last_run_id?: string | null; last_score?: number | null; blocked: boolean };
+}
+
+export interface TemplateVersion {
+  version: number;
+  body: string;
+  updated_at: string;
+  updated_by?: string | null;
+  note?: string | null;
+}
+
+export interface PromptTemplateDetail extends PromptTemplate {
+  versions: TemplateVersion[];
+}
+
+/** Fields sent on create and update (the server owns code on update, version, status and timestamps). */
+export type PromptTemplateInput = Omit<PromptTemplate, "version" | "updated_at" | "updated_by" | "eval_gate" | "status"> & {
+  status?: TemplateStatus;
+  note?: string | null;
+};
+
+export interface TemplatePreview {
+  prompt: string;
+  inputs: Record<string, unknown>;
+  missing_inputs: string[];
+}
+
+export type AiOutputStatus = "proposed" | "accepted" | "edited" | "rejected" | "failed" | "needs_input" | "info";
+
+export interface DiffPart {
+  op: "equal" | "insert" | "delete";
+  text: string;
+}
+
+export interface CheckFinding {
+  kind: string;
+  message: string;
+  severity: "error" | "warning";
+}
+
+export interface AiOutput {
+  id: string;
+  run_id?: string | null;
+  entity_id: string;
+  label: string;
+  attribute_code: string;
+  channel_code: string;
+  task_type: TaskType;
+  template_code: string;
+  template_version: number;
+  model: string;
+  status: AiOutputStatus; // info = check / classify-below-threshold results
+  proposed_value: unknown;
+  current_value: unknown;
+  final_value?: unknown; // after accept or edit
+  diff: DiffPart[]; // word-level vs current_value
+  draft_id?: string | null;
+  confidence?: number | null;
+  needs_input: string[];
+  grounding_errors: string[];
+  check_findings?: CheckFinding[]; // task_type check
+  rejection_reason?: string | null;
+  edit_distance?: number | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  latency_ms: number;
+  created_by: string;
+  created_at: string;
+  decided_by?: string | null;
+  decided_at?: string | null;
+}
+
+export interface AiOutputList {
+  rows: AiOutput[];
+  total: number;
+}
+
+export interface AiAskRequest {
+  entity_id: string;
+  template_code: string;
+  channel_code?: string;
+  text?: string;
+  document?: { name: string; content_base64: string };
+  image_asset_ids?: string[];
+}
+
+export type AiRunStatus = "sample_pending" | "sample_approved" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AiRun {
+  id: string;
+  kind: "single" | "bulk" | "eval";
+  template_code: string;
+  template_version: number;
+  task_type: TaskType;
+  channel_code: string;
+  selection: Record<string, unknown>;
+  status: AiRunStatus;
+  sample_entity_ids: string[];
+  total: number;
+  done: number;
+  proposed: number;
+  failed: number;
+  needs_input: number;
+  created_by: string;
+  created_at: string;
+  finished_at?: string | null;
+  job_run_id?: string | null;
+  error?: string | null;
+  report: Record<string, unknown>;
+}
+
+export interface AiRunDetail extends AiRun {
+  outputs: AiOutput[]; // first 200 (and the samples right after POST /api/ai/runs)
+}
+
+export interface AiRunList {
+  rows: AiRun[];
+  total: number;
+}
+
+export interface AiRunCreate {
+  template_code: string;
+  selection: { view_id?: string; entity_ids?: string[] };
+  channel_code?: string;
+}
+
+export interface AiMetrics {
+  template_code: string;
+  template_version?: number | null;
+  outputs: number;
+  accepted: number;
+  edited: number;
+  rejected: number;
+  pending: number;
+  acceptance_rate: number | null;
+  mean_edit_distance: number | null;
+  rejection_reasons: { reason: string; count: number }[];
+  tokens: { prompt: number; completion: number };
+}
+
+export interface EvalCase {
+  id: string;
+  entity_id: string;
+  label: string;
+  attribute_code: string;
+  reference_text: string;
+  created_at: string;
+}
+
+export type EvalRunStatus = "running" | "passed" | "blocked" | "failed";
+
+export interface EvalRun {
+  id: string;
+  template_code: string;
+  template_version: number;
+  model: string;
+  status: EvalRunStatus;
+  cases: number;
+  scores: { overlap: number; length_ok: number; grounded: number; voice_ok: number; composite: number };
+  baseline_run_id?: string | null;
+  baseline_composite?: number | null;
+  delta?: number | null;
+  threshold: number;
+  mlflow_run_id?: string | null;
+  created_by: string;
+  created_at: string;
+  finished_at?: string | null;
+  error?: string | null;
+  sample: { entity_id: string; label: string; reference: string; output: string; overlap: number }[];
+}
+
+export type QualityGrade = "A" | "B" | "C" | "D" | "E";
+
+export interface QualitySettings {
+  excluded_groups: string[];
+  weights: Record<string, number>; // check code -> weight
+  enabled_checks: string[];
+  grade_bands: { A: number; B: number; C: number; D: number }; // minimum score per grade, E below D
+}
+
+export interface QualityCheck {
+  code: string;
+  label: string;
+  passed: boolean;
+  weight: number;
+  details: string[];
+}
+
+export interface QualityScore {
+  entity_id: string;
+  channel_code: string; // "" = overall
+  grade: QualityGrade;
+  score: number;
+  checks: QualityCheck[];
+  computed_at: string;
+}
+
+export interface QualityDashboardRow {
+  key: string;
+  label: string;
+  A: number;
+  B: number;
+  C: number;
+  D: number;
+  E: number;
+  avg_score: number;
+}
+
+export type QualityDashboardBy = "family" | "season" | "channel";
+
+/** Grid rows: `quality: {[channel_code or ""]: {grade, score}}` (GOV-03). */
+export interface QualityCell {
+  grade: QualityGrade;
+  score: number;
+}
+
+/** Approval queue rows carry the originating run (AI-04); `runs` summarizes them for the Run filter. */
+export interface ApprovalRunSummary {
+  run_id: string;
+  template_code: string;
+  count: number;
 }
