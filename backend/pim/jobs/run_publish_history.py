@@ -25,14 +25,22 @@ def main() -> None:
     p.add_argument("--schema", default="pim")
     a, _ = p.parse_known_args()
     s = get_settings()
+    import time
+
     from databricks.sdk import WorkspaceClient
-    from databricks.sdk.service.sql import Disposition
+    from databricks.sdk.service.sql import Disposition, StatementState
 
     w = WorkspaceClient()
 
     def sql(stmt: str) -> None:
-        w.statement_execution.execute_statement(statement=stmt, warehouse_id=s.sql_warehouse_id, wait_timeout="50s",
-                                                disposition=Disposition.INLINE)
+        resp = w.statement_execution.execute_statement(statement=stmt, warehouse_id=s.sql_warehouse_id, wait_timeout="50s",
+                                                       disposition=Disposition.INLINE)
+        while resp.status and resp.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            time.sleep(2)
+            resp = w.statement_execution.get_statement(resp.statement_id)
+        if resp.status is None or resp.status.state != StatementState.SUCCEEDED:
+            err = resp.status.error if resp.status else None
+            raise RuntimeError(f"SQL statement failed ({resp.status.state if resp.status else 'no status'}): {err}; {stmt[:160]}")
 
     with session_scope() as session:
         sql(f"CREATE SCHEMA IF NOT EXISTS {a.catalog}.{a.schema}")

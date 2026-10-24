@@ -140,9 +140,12 @@ def clear_values(entity_id: str, body: ClearBody, session: Session = Depends(get
 
 @router.get("/products/{entity_id}/history")
 def history(entity_id: str, attribute_code: str | None = None, user_email: str | None = None, page: int = 1,
-            page_size: int = 50, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+            page_size: int = 50, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
+            user: CurrentUser = Depends(get_current_user)) -> dict:
     _entity_or_404(session, entity_id, user)
-    q = select(ValueHistory).where(ValueHistory.entity_id == entity_id)
+    # History carries old and new values, so it is scoped by the same data rights as the cells (RBAC-01, D-05).
+    viewable = [a.code for a in meta.attributes.values() if user.can_view_group(a.group_code)]
+    q = select(ValueHistory).where(ValueHistory.entity_id == entity_id, ValueHistory.attribute_code.in_(viewable))
     if attribute_code:
         q = q.where(ValueHistory.attribute_code == attribute_code)
     if user_email:

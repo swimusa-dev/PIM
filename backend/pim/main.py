@@ -69,8 +69,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa(full_path: str):  # noqa: ANN001
-            candidate = STATIC_DIR / full_path
-            if full_path and candidate.is_file():
+            candidate = resolve_static(full_path)
+            if candidate is not None:
                 return FileResponse(candidate)
             return FileResponse(STATIC_DIR / "index.html")
     else:
@@ -79,6 +79,18 @@ def create_app() -> FastAPI:
             return {"app": "Swim USA PIM", "version": __version__, "docs": "/api/docs",
                     "note": "Frontend build missing. Run `npm run build` in frontend/."}
     return app
+
+
+def resolve_static(full_path: str, root: Path | None = None) -> Path | None:
+    """Return the static file for a request path only when it resolves inside the static directory.
+    Percent-encoded dot segments (`/..%2Fconfig.py`) must never escape it."""
+    base = (root or STATIC_DIR).resolve()
+    if not full_path:
+        return None
+    candidate = (base / full_path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(base):
+        return candidate
+    return None
 
 
 def _seed_if_empty() -> None:

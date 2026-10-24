@@ -44,6 +44,16 @@ def _pkg_out(p: UpdatePackage, with_rows: bool = False) -> dict:
     return d
 
 
+def safe_filename(name: str | None, default: str) -> str:
+    """Client-supplied filenames are untrusted: keep the basename and a conservative character set."""
+    import re
+    from pathlib import PurePosixPath
+
+    base = PurePosixPath(name or "").name.replace("\\", "_")
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._")
+    return cleaned or default
+
+
 def _summary_out(summary: dict) -> dict:
     out = dict(summary)
     if isinstance(summary.get("by_field"), dict):
@@ -140,7 +150,7 @@ async def snapshot_upload(package_id: str, file: UploadFile, session: Session = 
     _require_run_right(user, pkg.channel_code)
     content = await file.read()
     storage = _storage()
-    pkg.snapshot_path = storage.write(f"{pkg.id}/snapshot/{file.filename or 'products_export.csv'}", content)
+    pkg.snapshot_path = storage.write(f"{pkg.id}/snapshot/{safe_filename(file.filename, 'products_export.csv')}", content)
     pkg.snapshot_mode = "csv_upload"
     _run_build(session, meta, user, pkg)
     session.commit()

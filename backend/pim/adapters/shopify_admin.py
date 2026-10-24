@@ -49,19 +49,31 @@ class ShopifySnapshot:
     def __init__(self) -> None:
         self.products: dict[str, dict] = {}
         self.taken_at: str | None = None
+        self._sku_index: dict[str, tuple[dict, dict]] | None = None
 
     def by_handle(self, handle: str) -> dict | None:
         return self.products.get(handle.lower())
 
-    def by_sku(self, sku: str) -> tuple[dict, dict] | None:
+    def by_sku(self, sku: str | None) -> tuple[dict, dict] | None:
+        if not sku:
+            return None
+        if self._sku_index is None:
+            self.reindex()
+        assert self._sku_index is not None
+        return self._sku_index.get(sku.upper())
+
+    def reindex(self) -> None:
+        """Build the SKU index once; a 100,000-SKU selection would otherwise scan every variant per lookup."""
+        index: dict[str, tuple[dict, dict]] = {}
         for p in self.products.values():
             for v in p.get("variants", []):
-                if (v.get("sku") or "").upper() == sku.upper():
-                    return p, v
-        return None
+                if v.get("sku"):
+                    index.setdefault(str(v["sku"]).upper(), (p, v))
+        self._sku_index = index
 
     def add(self, product: dict) -> None:
         self.products[product["handle"].lower()] = product
+        self._sku_index = None
 
 
 class ShopifyAdminClient:
@@ -224,4 +236,5 @@ def parse_product_csv(content: bytes | str) -> ShopifySnapshot:
         if row.get("Variant SKU") or options:
             current["variants"].append({"sku": row.get("Variant SKU"), "barcode": row.get("Variant Barcode"),
                                         "price": row.get("Variant Price"), "options": options, "metafields": {}})
+    snap.reindex()  # variants were appended after add()
     return snap

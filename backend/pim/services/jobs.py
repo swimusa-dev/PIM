@@ -60,5 +60,7 @@ def _inline_ingest(run_id: str) -> None:
                 run.report = {"ingest_run_id": ing.id, "rows_read": ing.rows_read, "created": ing.created, "updated": ing.updated}
         except Exception as exc:  # noqa: BLE001
             log.exception("inline ingest failed")
+            session.rollback()  # the ingest left the session in a failed state; start clean before recording
+            run = session.get(JobRun, run_id)
             if run:
                 run.status, run.finished_at, run.error = "failed", utcnow(), str(exc)[:2000]

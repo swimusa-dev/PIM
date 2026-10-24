@@ -13,7 +13,15 @@ class Storage:
         self.is_volume = self.root.startswith("/Volumes/")
 
     def path(self, *parts: str) -> str:
-        return "/".join([self.root, *[p.strip("/") for p in parts]])
+        segments: list[str] = []
+        for part in parts:
+            for seg in part.replace("\\", "/").split("/"):
+                if seg in ("", "."):
+                    continue
+                if seg == "..":
+                    raise ValueError("Path traversal rejected")
+                segments.append(seg)
+        return "/".join([self.root, *segments])
 
     def write(self, rel: str, data: bytes) -> str:
         full = self.path(rel)

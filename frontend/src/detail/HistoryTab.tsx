@@ -28,7 +28,7 @@ export function HistoryTab({
 
   const q = useQuery({
     queryKey: ["product", entityId, "history", attributeCode, user, page],
-    queryFn: () => api.products.history(entityId, { attribute_code: attributeCode || undefined, user: user || undefined, page }),
+    queryFn: () => api.products.history(entityId, { attribute_code: attributeCode || undefined, user_email: user || undefined, page }),
   });
 
   const restore = useMutation({

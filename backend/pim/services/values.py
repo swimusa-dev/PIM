@@ -363,12 +363,19 @@ def set_value(session: Session, meta: Metadata, user: CurrentUser | None, entity
 
     # Draft path (DM-08): user may edit but not approve -> draft awaiting approval.
     if not force and user is not None and not user.can_approve_group(attr.group_code):
-        draft = ValueDraft(
-            entity_level=entity.level, entity_id=entity.id, attribute_code=code, channel_code=channel,
-            proposed={"value": typed.as_python(), "not_applicable": typed.not_applicable},
-            source_type=source_type, ai_generated=ai_generated, submitted_by=user.email, state="draft",
-        )
-        session.add(draft)
+        proposed = {"value": typed.as_python(), "not_applicable": typed.not_applicable}
+        open_draft = session.execute(select(ValueDraft).where(
+            ValueDraft.entity_id == entity.id, ValueDraft.attribute_code == code, ValueDraft.channel_code == channel,
+            ValueDraft.state.in_(["draft", "proposed"])).order_by(ValueDraft.submitted_at.desc())).scalars().first()
+        if open_draft is not None:
+            # One open draft per value: a correction replaces the pending proposal instead of stacking a new one.
+            open_draft.proposed, open_draft.submitted_by, open_draft.submitted_at = proposed, user.email, utcnow()
+            open_draft.source_type, open_draft.ai_generated, open_draft.state = source_type, ai_generated, "draft"
+        else:
+            session.add(ValueDraft(
+                entity_level=entity.level, entity_id=entity.id, attribute_code=code, channel_code=channel,
+                proposed=proposed, source_type=source_type, ai_generated=ai_generated, submitted_by=user.email, state="draft",
+            ))
         return WriteOutcome(code, "draft", "Saved as a draft; send for approval")
 
     old = snapshot(existing)

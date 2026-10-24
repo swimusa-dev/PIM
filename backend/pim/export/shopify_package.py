@@ -214,7 +214,7 @@ def _current_value(product: dict, target: Target, variant: dict | None = None) -
 def find_handle(session: Session, snap: ShopifySnapshot, sc: ProductEntity, skus: list[ProductEntity],
                 title: str | None) -> str | None:
     alias = session.execute(select(IdentifierAlias).where(IdentifierAlias.entity_id == sc.id,
-                                                          IdentifierAlias.alias_type == "shopify_handle")).scalar_one_or_none()
+                                                          IdentifierAlias.alias_type == "shopify_handle")).scalars().first()
     if alias and snap.by_handle(alias.alias):
         return alias.alias
     for s in skus:
@@ -222,8 +222,14 @@ def find_handle(session: Session, snap: ShopifySnapshot, sc: ProductEntity, skus
             hit = snap.by_sku(s.sku)
             if hit:
                 handle = hit[0]["handle"]
-                session.add(IdentifierAlias(entity_id=sc.id, alias=handle, alias_type="shopify_handle",
-                                            normalized=handle.lower(), source="shopify"))
+                # uq_alias is (alias_type, normalized): remember the handle only if no entity owns it yet
+                # (two style-colors can legitimately share one Shopify product).
+                taken = session.execute(select(IdentifierAlias.id).where(
+                    IdentifierAlias.alias_type == "shopify_handle", IdentifierAlias.normalized == handle.lower())).first()
+                if taken is None:
+                    session.add(IdentifierAlias(entity_id=sc.id, alias=handle, alias_type="shopify_handle",
+                                                normalized=handle.lower(), source="shopify"))
+                    session.flush()
                 return handle
     if title and snap.by_handle(slugify(title)):
         return slugify(title)

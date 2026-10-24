@@ -199,6 +199,7 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
     seen_entity_ids: set[str] = set()
     touched_style_colors: dict[str, ProductEntity] = {}
     new_style_colors: list[ProductEntity] = []
+    style_live: dict[str, bool] = {}  # style id -> at least one non-discontinued row seen this load
     try:
         for row in rows if rows is not None else source.read_changes(since):
             stats.rows += 1
@@ -236,8 +237,7 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                 _write_erp_attributes(session, meta, st, row, stats, change_set, now)
             else:
                 _write_erp_attributes(session, meta, st, row, stats, change_set, now)
-            if discontinued:
-                st.lifecycle_status = "discontinued"
+            style_live[st.id] = style_live.get(st.id, False) or not discontinued
             if not color:
                 continue
             # Style-color
@@ -255,6 +255,8 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                 stats.discontinued += 1
             elif sc_new:
                 new_style_colors.append(sc)
+            elif sc.lifecycle_status == "discontinued":
+                sc.lifecycle_status = "active"  # reactivated in the ERP
             touched_style_colors[sc.id] = sc
             # SKU (a style-color may have no sizes yet, F8)
             if size or is_prepack:
@@ -285,9 +287,22 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                 _write_erp_attributes(session, meta, sk, row, stats, change_set, now)
                 if discontinued:
                     sk.lifecycle_status = "discontinued"
+                elif sk.lifecycle_status == "discontinued":
+                    sk.lifecycle_status = "active"
             if stats.rows % 500 == 0:
                 session.flush()
                 log.info("ingest: %s rows", stats.rows)
+        # A style is discontinued only when every row seen for it this load is discontinued (never because one
+        # old color is); a style with any live color stays, or becomes, active.
+        styles_by_id = {e.id: e for e in cache.values() if e.level == "style"}
+        for st_id, live in style_live.items():
+            st = styles_by_id.get(st_id)
+            if st is None:
+                continue
+            if not live:
+                st.lifecycle_status = "discontinued"
+            elif st.lifecycle_status == "discontinued":
+                st.lifecycle_status = "active"
         # Promote "new" to "active" once ERP attributes exist, start launch workflows for new style-colors
         for sc in new_style_colors:
             _start_launch_workflow(session, sc, stats, now)
@@ -297,20 +312,29 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
         session.flush()
         refresh_snapshots(session, meta, list(touched_style_colors.values()))
         run.status = "succeeded"
+        _finalize_run(run, stats, change_set.id)
+        session.flush()
     except Exception as exc:  # noqa: BLE001
         log.exception("ingest failed")
-        run.status = "failed"
-        run.error = str(exc)[:2000]
+        # The transaction is rolled back (nothing partial is kept), then the failure itself is recorded in a
+        # fresh transaction so the run does not stay "running" forever (GOV-04).
+        started = run.started_at
+        session.rollback()
+        failed = IngestRun(source=run.source, status="failed", started_at=started, error=str(exc)[:2000])
+        _finalize_run(failed, stats, None)
+        session.add(failed)
+        session.commit()
         raise
-    finally:
-        run.finished_at = utcnow()
-        run.rows_read, run.created, run.updated = stats.rows, stats.created, stats.updated
-        run.discontinued, run.placeholders_removed = stats.discontinued, stats.placeholders
-        run.defects_found, run.workflows_started = stats.defects, stats.workflows
-        run.report = {"placeholders_by_column": stats.placeholders_by_column, "unmapped_sizes": stats.unmapped_sizes,
-                      "change_set_id": change_set.id}
-        session.flush()
     return run
+
+
+def _finalize_run(run: IngestRun, stats: _Stats, change_set_id: str | None) -> None:
+    run.finished_at = utcnow()
+    run.rows_read, run.created, run.updated = stats.rows, stats.created, stats.updated
+    run.discontinued, run.placeholders_removed = stats.discontinued, stats.placeholders
+    run.defects_found, run.workflows_started = stats.defects, stats.workflows
+    run.report = {"placeholders_by_column": stats.placeholders_by_column, "unmapped_sizes": stats.unmapped_sizes,
+                  "change_set_id": change_set_id}
 
 
 def latest_successful_load(session: Session) -> IngestRun | None:

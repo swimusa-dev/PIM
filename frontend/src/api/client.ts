@@ -137,7 +137,7 @@ export const api = {
         attribute_codes: attributeCodes,
         channel_code: channelCode ?? null,
       }),
-    history: (entityId: string, params: { attribute_code?: string; user?: string; page?: number } = {}) =>
+    history: (entityId: string, params: { attribute_code?: string; user_email?: string; page?: number } = {}) =>
       get<HistoryResult>(`/api/products/${encodeURIComponent(entityId)}/history${qs(params)}`),
     restore: (entityId: string, historyId: string) =>
       post<ValueEditResponse>(
