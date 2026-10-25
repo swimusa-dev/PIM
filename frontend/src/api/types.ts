@@ -120,6 +120,8 @@ export interface Readiness {
   mapping_gaps: string[];
   invalid: string[];
   reasons: string[];
+  // Phase 6 (EXP-03): non-blocking notes, e.g. a related product that is discontinued or missing.
+  warnings?: string[];
 }
 
 export type LifecycleStatus = "active" | "discontinued" | "new";
@@ -534,6 +536,8 @@ export interface Telemetry {
   job_runs: JobRun[];
   adapter_errors: { adapter: string; at: string; message: string; [key: string]: unknown }[];
   ai_spend: { period?: string; calls?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number; [key: string]: unknown };
+  // Phase 6 (GOV-04): 30-day error rate per adapter.
+  adapter_error_rates?: AdapterErrorRate[];
   [key: string]: unknown;
 }
 
@@ -1693,4 +1697,111 @@ export interface SandboxReport {
   protected_check: SandboxProtectedCheck[];
   errors: string[];
   at: string;
+}
+
+// =====================================================================================
+// Phase 6: relationships, whole-product restore and change sets, digest settings, adapter
+// error rates (docs/api-contract-phase6.md: DM-13, GOV-02, DM-07, DM-09, GOV-04)
+// =====================================================================================
+
+export type RelationshipDirection = "one_way" | "two_way";
+
+export interface RelationshipType {
+  code: string;
+  label: string;
+  direction: RelationshipDirection;
+  level: "style" | "style_color";
+  allows_quantity: boolean;
+  enabled: boolean;
+  sort_order: number;
+  help_text?: string | null;
+}
+
+export interface RelationshipTarget {
+  entity_id: string;
+  label: string | null;
+  style_number: string | null;
+  color_code: string | null;
+  lifecycle_status: string | null;
+}
+
+export interface Relationship {
+  id: string;
+  type_code: string;
+  type_label: string;
+  direction: RelationshipDirection;
+  /** Set on the style and shown on its colors, where it is read only. */
+  inherited: boolean;
+  quantity?: number | null;
+  created_by: string;
+  created_at: string;
+  target: RelationshipTarget;
+  /** The target is discontinued or gone. */
+  broken: boolean;
+}
+
+export interface RelationshipAddRequest {
+  type_code: string;
+  targets?: string[];
+  paste?: string;
+  quantity?: number;
+}
+
+export interface RelationshipAddResult {
+  created: number;
+  skipped: { token: string; reason: string }[];
+  rows: Relationship[];
+}
+
+export type ChangeSetKind = "edit" | "import" | "bulk" | "ai" | "ingest" | "rule" | "restore" | "rollback" | "approval" | string;
+
+export interface ChangeSet {
+  id: string;
+  kind: ChangeSetKind;
+  created_by: string;
+  created_at: string;
+  description?: string | null;
+  source_ref?: string | null;
+  rolled_back_at?: string | null;
+  /** History rows in the set. */
+  changes?: number | null;
+}
+
+export interface ChangeSetList {
+  rows: ChangeSet[];
+  total: number;
+}
+
+export type RestoreToOutcome = "approved" | "draft" | "rejected" | "unchanged" | "skipped";
+
+export interface RestoreToResult {
+  change_set_id: string;
+  restored: number;
+  results: { attribute_code: string; channel_code?: string | null; outcome: RestoreToOutcome; message?: string | null }[];
+}
+
+export interface RollbackResult {
+  restored: number;
+  /** Values touched since the set was written; they are listed, not reverted. */
+  manual: { entity_id: string; attribute_code: string; reason: string }[];
+  [k: string]: unknown;
+}
+
+export type DigestFrequency = "daily" | "weekly" | "off";
+
+export interface MeSettings {
+  email: string;
+  digest_frequency: DigestFrequency;
+  last_digest_at?: string | null;
+}
+
+export interface AdapterErrorRate {
+  adapter: string;
+  window_days: number;
+  calls: number;
+  errors: number;
+  /** 0..1, or null when the adapter made no calls in the window. */
+  error_rate: number | null;
+  last_error_at?: string | null;
+  last_error?: string | null;
 }
