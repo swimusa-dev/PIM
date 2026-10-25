@@ -14,3 +14,4 @@ python-multipart>=0.0.9
 rapidfuzz>=3.9
 jsonschema>=4.20
 pillow>=10.0
+paramiko>=3.4

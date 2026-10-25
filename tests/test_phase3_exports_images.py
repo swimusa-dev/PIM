@@ -78,6 +78,7 @@ def _template_xlsx(required_hint=True) -> bytes:
 
 def _configure_nordstrom(session, meta, admin) -> Channel:
     ch = session.get(Channel, "nordstrom")
+    ch.config = {**(ch.config or {}), "file_format": "csv", "transport": "download"}  # Phase 3 generic feed path; Phase 5 moved the seed to XLSX
     ch.target_schema = load_retailer_xlsx(_template_xlsx()).as_dict()
     ch.attribute_mapping = {"core.style_number": "Vendor Style", "product_title": "Product Title", "color_family": "Color Family",
                             "product_description": "Long Description", "fabric.fabric_care": "Care"}
@@ -223,7 +224,7 @@ def test_exp05_feedback_maps_errors_tags_and_notifies(session, meta, admin, inge
     rec = publishing.start_run(session, ch, "publish", "full", admin.email, {"entity_ids": [fvp.id, blk.id]})
     publishing.execute_run(session, meta, ch, rec, send=True)
     session.commit()
-    assert rec.status == "completed" and rec.summary["delivery"] == "download"
+    assert rec.status == "completed" and rec.summary["delivery"]["transport"] == "download"
     rows = publishing.parse_feedback_file("retailer_feedback.csv", (P3 / "retailer_feedback.csv").read_bytes())
     assert len(rows) == 4 and rows[0]["external_id"] == "200809-FVP"
     result = publishing.apply_feedback(session, meta, ch, rec, rows)
@@ -475,6 +476,8 @@ def client(session, ingested):
 
 
 def test_phase3_api_schema_mapping_dry_run_and_rbac(client, session, meta, admin):
+    session.get(Channel, "nordstrom").config = {**(session.get(Channel, "nordstrom").config or {}), "file_format": "csv"}
+    session.commit()
     r = client.post("/api/channels/nordstrom/schema/refresh", headers=ADMIN, files={"file": ("template.xlsx", _template_xlsx())})
     assert r.status_code == 200, r.text
     assert len(r.json()["diff"]["added"]) == 6 and r.json()["schema"]["source"] == "retailer_xlsx"

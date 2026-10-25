@@ -1,5 +1,5 @@
-// Interfaces copied from docs/api-contract.md (PIM API contract v1) plus the Phase 2, 3 and 4 additions
-// (AI-01 to AI-07 and GOV-03 at the end of the file).
+// Interfaces copied from docs/api-contract.md (PIM API contract v1) plus the Phase 2, 3, 4 and 5 additions
+// (AI-01 to AI-07 and GOV-03, then Phase 5 EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13 at the end of the file).
 // Keep these in sync with the backend; the frontend builds exactly to this contract.
 
 export type Level = "style" | "style_color" | "sku";
@@ -389,6 +389,8 @@ export type PackageStatus = "pending" | "building" | "ready" | "failed" | "recon
 export interface PackageFile {
   name: string;
   size: number;
+  // Phase 5 (D-13): "matrixify" for matrixify.xlsx beside the review workbook and the native CSVs.
+  kind?: string;
 }
 
 export interface Package {
@@ -431,6 +433,8 @@ export interface PackageSummary {
 export interface PackageDetail extends Package {
   rows: PackageRow[];
   summary: PackageSummary;
+  // Phase 5 (D-03): the last Shopify sandbox run report, when any.
+  sandbox_report?: SandboxReport | null;
 }
 
 export interface PackageCreate {
@@ -1159,7 +1163,9 @@ export interface Publish {
   invalid_count: number;
   selection: Record<string, unknown>;
   files: PublishFile[];
-  summary: Record<string, unknown>; // dry_run: summary.preview object[]; package transport: summary.package_id
+  // dry_run: summary.preview object[]; package transport: summary.package_id; Phase 5: summary.delivery (DeliveryResult),
+  // summary.walmart (WalmartFeedSummary), summary.listing_quality ({[external_id]: number}).
+  summary: Record<string, unknown>;
   external_batch_id?: string | null;
   error?: string | null;
 }
@@ -1182,6 +1188,8 @@ export interface PublishItem {
   issues: PayloadIssue[];
   errors: PublishItemError[];
   updated_at: string;
+  // Phase 5 (EXP-08): Walmart Listing Quality score pulled by the feedback poll.
+  listing_quality?: number | null;
 }
 
 export interface PublishDetail extends Publish {
@@ -1229,6 +1237,9 @@ export interface ChannelHealth {
   last_success_at?: string | null;
   open_rejections: number;
   top_errors: { message: string; count: number; kind: "internal" | "external" }[];
+  // Phase 5 (EXP-08)
+  listing_quality_avg?: number | null;
+  feeds_in_progress?: number;
 }
 
 export interface ChannelDelta {
@@ -1565,4 +1576,120 @@ export interface ApprovalRunSummary {
   run_id: string;
   template_code: string;
   count: number;
+}
+
+// =====================================================================================
+// Phase 5: marketplaces, feeds, Shopify sandbox (docs/api-contract-phase5.md)
+// EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13
+// =====================================================================================
+
+export type FeedCaseTransform = "as_is" | "title" | "sentence" | "upper" | "lower";
+
+/** One column of a template-based feed. `source` is an attribute code, a ref path, core.<field>, erp.<field>,
+ * image:<n>, nrf_color, nrf_size or gtin. */
+export interface FeedColumn {
+  header: string;
+  source: string;
+  always_include: boolean;
+  case_transform: FeedCaseTransform;
+  value_map: Record<string, string>;
+  required: boolean;
+}
+
+export type TransportKind = "download" | "sftp" | "email" | "api";
+export type FeedFileFormat = "csv" | "xlsx" | "json";
+export type RithumProgram = "nordstrom_dropship" | "targetplus";
+
+export interface SftpSettings {
+  host: string;
+  port: number;
+  path: string;
+  username: string;
+  secret_name: string; // app secret resource holding the password or key
+}
+
+export interface EmailSettings {
+  to: string[];
+  subject: string;
+}
+
+export interface WalmartSettings {
+  spec_version: string;
+  product_type: string;
+  max_items_per_feed: number;
+  variant_attribute_names: string[];
+}
+
+export interface RithumSettings {
+  supplier_id?: string | null;
+  vpn_prefix?: string | null;
+  program: RithumProgram;
+  family_rules: boolean;
+}
+
+export interface ChannelTransport {
+  transport: TransportKind;
+  file_format: FeedFileFormat;
+  feed_template_path?: string | null;
+  feed_template_name?: string | null;
+  header_row: number;
+  feed_columns: FeedColumn[];
+  sftp?: SftpSettings | null;
+  email?: EmailSettings | null;
+  walmart?: WalmartSettings | null;
+  rithum?: RithumSettings | null;
+}
+
+/** POST /api/channels/{code}/feed-template response. */
+export interface FeedTemplateUpload {
+  feed_template_path: string;
+  feed_template_name: string;
+  columns: string[];
+  schema_loaded: boolean;
+}
+
+export type DeliveryStatus = "delivered" | "skipped" | "failed";
+
+export interface DeliveryResult {
+  transport: string;
+  status: DeliveryStatus;
+  detail: string;
+  at: string;
+  files: string[];
+}
+
+/** `Publish.summary.walmart` (EXP-08). */
+export interface WalmartFeedSummary {
+  feed_ids: string[];
+  status: string;
+  next_poll_at?: string | null;
+  polls: number;
+}
+
+export type SandboxMutationStatus = "planned" | "ok" | "error";
+
+export interface SandboxMutation {
+  kind: string;
+  handle: string;
+  fields: string[];
+  status: SandboxMutationStatus;
+  message?: string;
+}
+
+export interface SandboxProtectedCheck {
+  handle: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  unchanged: boolean;
+}
+
+export interface SandboxReport {
+  store: string;
+  mode: "plan" | "executed";
+  products: number;
+  mutations: SandboxMutation[];
+  protected_check: SandboxProtectedCheck[];
+  errors: string[];
+  at: string;
 }

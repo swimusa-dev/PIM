@@ -41,7 +41,7 @@ def main() -> None:
             if ch is None:
                 continue
             try:
-                report["feedback"][rec.id] = publishing.poll_feedback(s, meta, ch, rec)
+                report["feedback"][rec.id] = publishing.poll_feedback(s, meta, ch, rec, force=False)  # Walmart: 15 min, 1 h, 2 h, then 4 h
             except (NotConfigured, NotImplementedError) as exc:
                 report["feedback"][rec.id] = {"skipped": str(exc)[:200]}
             s.commit()

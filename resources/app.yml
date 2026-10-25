@@ -32,6 +32,24 @@ resources:
             scope: ${var.secret_scope}
             key: shopify-read-token
             permission: READ
+        - name: shopify-sandbox-token
+          description: Admin API token for the development store used by the D-03 sandbox run (write_products)
+          secret:
+            scope: ${var.secret_scope}
+            key: shopify-sandbox-token
+            permission: READ
+        - name: walmart-client-id
+          description: Walmart Marketplace API client id (EXP-08)
+          secret:
+            scope: ${var.secret_scope}
+            key: walmart-client-id
+            permission: READ
+        - name: walmart-client-secret
+          description: Walmart Marketplace API client secret (EXP-08)
+          secret:
+            scope: ${var.secret_scope}
+            key: walmart-client-secret
+            permission: READ
         - name: ingest-job
           description: Style Master ingest job (IMP-09), ARC-04 "Can manage run"
           job:

@@ -259,3 +259,20 @@ class QualitySettingsBody(BaseModel):
 
 class RecomputeBody(BaseModel):
     entity_ids: list[str] | None = None
+
+
+# ---- Phase 5 (EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13) ----
+class TransportBody(BaseModel):
+    transport: str = "download"
+    file_format: str = "csv"
+    header_row: int = 1
+    row_level: str | None = None
+    feed_columns: list[dict] = []
+    sftp: dict | None = None
+    email: dict | None = None
+    walmart: dict | None = None
+    rithum: dict | None = None
+
+
+class SandboxRunBody(BaseModel):
+    plan_only: bool = True

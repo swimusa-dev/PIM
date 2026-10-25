@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     shopify_store_domain: str | None = None
     shopify_read_token: str | None = None
     shopify_api_version: str = "2026-01"
+    shopify_sandbox_domain: str | None = None  # D-03: development store for the write-path sandbox run
+    shopify_sandbox_token: str | None = None
+    walmart_client_id: str | None = None  # EXP-08 (secrets walmart-client-id, walmart-client-secret)
+    walmart_client_secret: str | None = None
+    walmart_base_url: str = "https://marketplace.walmartapis.com"
+    smtp_host: str | None = None  # EXP-09 email delivery
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
 
     # --- Feature flags (seams for UNCONFIRMED items) ---------------------------------------
     feature_shopify_direct_write: bool = Field(default=False)  # EXP-07, off until owner approves

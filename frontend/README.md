@@ -36,9 +36,9 @@ src/
   detail/     product detail pieces: tree, attribute form, images, history, comments, workflow panel, carryover, Ask AI panel, quality panel
   imports/    import wizard steps: shared helpers, Upload, Map (with value mappings and templates), Validate, Match, Review
   workflows/  workflow item actions (advance, reject, assign) shared by My Work and the detail panel
-  admin/      admin tabs (including Rules, AI with BrandVoices and PromptTemplates, Quality); admin/channel/ holds the per-channel editor tabs
+  admin/      admin tabs (including Rules, AI with BrandVoices and PromptTemplates, Quality); admin/channel/ holds the per-channel editor tabs (Phase 5: TransportTab)
   ai/         Phase 4 AI pieces shared by several screens: shared.tsx (task labels, status pills, diff view, 409 banner), OutputCard (review card), Evaluation tab
-  exports/    pieces shared by the Exports pages: status pills, Dry run / Publish dialog, delta preview
+  exports/    pieces shared by the Exports pages: status pills, Dry run / Publish dialog, delta preview, Phase 5 delivery and Walmart feed cards (DeliveryCards)
   pages/      one file per route, each headed with the requirement IDs it implements
   lib/        format, validation, tsv helpers
 ```
@@ -52,12 +52,12 @@ src/
 | `/products/:id` | Product detail (Phase 4: Ask AI tab, Quality section, `?attr=<code>` focuses an attribute row) | DM-01, DM-05, DM-06, DM-11, IMG-05, GOV-02, GOV-03, AI-03, AI-05, AI-06 |
 | `/reference/:type`, `/reference/:type/:id` | Reference entities | DM-11 |
 | `/approvals` | Approval queue (Phase 4: Run filter, run and template chips, Accept all in run) | DM-08, AI-04 |
-| `/packages`, `/packages/:id` | Shopify update packages | EXP-13 |
+| `/packages`, `/packages/:id` | Shopify update packages (Phase 5: file kinds including matrixify.xlsx, Shopify sandbox section with Plan only, Run against sandbox and the SandboxReport view) | EXP-13, D-03, D-13 |
 | `/exports` | Exports: channel picker, Dry run, Publish, Delta preview, publish history with channel and kind filters | EXP-04, EXP-05, EXP-06 |
-| `/exports/:id` | Publish detail: summary, payload preview, files, items with issues and errors, retailer feedback upload or adapter poll, package link | EXP-04, EXP-05, EXP-13 |
+| `/exports/:id` | Publish detail: summary, payload preview, files, items with issues and errors, retailer feedback upload or adapter poll, package link (Phase 5: Delivery card with Deliver now, Walmart feeds card with Poll now, Listing quality column) | EXP-04, EXP-05, EXP-13, EXP-08, EXP-09 |
 | `/images` | Image review queues: candidates, missing shots, unparsed (with Ask AI for candidates), failing rules per channel | IMG-03, IMG-05 |
 | `/admin/:tab` | Metadata, roles, rules, AI (brand voice, prompt templates), quality settings and dashboard, reports, telemetry | 1.3, RBAC, IMP-11, GOV-01, GOV-03, GOV-04, GOV-07, AI-02 |
-| `/admin/channels` | Channel list; each row expands into Target schema, Mapping, Image profile, Schedule and Health tabs | EXP-01, EXP-02, EXP-05, EXP-06, IMG-07 |
+| `/admin/channels` | Channel list; each row expands into Target schema, Mapping, Image profile, Transport, Schedule and Health tabs | EXP-01, EXP-02, EXP-05, EXP-06, EXP-08, EXP-09, EXP-10, EXP-11, IMG-07 |
 | `/admin/rules` | Rules engine: list, editor, preview on samples, activate, run now, runs | GOV-01, GOV-06 |
 | `/imports` | Import history, mapping templates, import sources | IMP-07, IMP-02, IMP-01 |
 | `/imports/new`, `/imports/:id` | Import wizard: Upload, Map, Validate, Match, Review and Commit | IMP-01 to IMP-08, IMP-12 |
@@ -171,6 +171,56 @@ Built to `docs/api-contract-phase4.md`. The client lives in `src/api/client.ts` 
 - The `run_ai` permission is read from `/api/me` `permissions`; admins (`admin_metadata`) always see the AI screens.
 - Rejecting from the run page's outputs table sends the fixed reason "Rejected from the run page"; the card view
   asks for a reason.
+
+## Phase 5 additions
+
+Built to `docs/api-contract-phase5.md` (marketplaces, feeds, Shopify sandbox). The client additions live in
+`src/api/client.ts` as `channelApi.transport`, `channelApi.saveTransport`, `channelApi.uploadFeedTemplate`,
+`channelApi.feedTemplateUrl`, `publishApi.deliver` and `api.packages.sandboxRun`; the interfaces (`FeedColumn`,
+`ChannelTransport`, `FeedTemplateUpload`, `DeliveryResult`, `WalmartFeedSummary`, `SandboxReport`) are appended to
+`src/api/types.ts`, and `PublishItem`, `ChannelHealth`, `PackageFile` and `PackageDetail` gained the optional Phase 5
+fields.
+
+- Admin > Channels > Transport (`src/admin/channel/TransportTab.tsx`, EXP-09, EXP-10, EXP-11): transport radio
+  (download, SFTP, email, API), file format, feed template upload (`.xlsx` or `.csv`) with the stored name as a
+  download link and the header columns returned by the upload, header row, and the feed columns table (header,
+  source picker, Always include, case transform, value map as key / value rows, Required, add / remove / reorder,
+  "Columns from template"). The source picker is metadata-driven: core identifiers as `core.<field>`, every attribute
+  grouped by attribute group, a typed reference path (also used for `erp.<field>`), `image:1` to `image:6`,
+  `nrf_color`, `nrf_size` and `gtin`. Conditional sections: SFTP (host, port, path, username, secret name), Email
+  (recipients, subject), Walmart (spec version, product type, max items per feed, up to three variant attribute
+  pickers) when the adapter is `walmart_mp`, Rithum (program, supplier id, VPN prefix, family rules) when the adapter
+  contains `rithum`. The tab has its own Save / Discard; Save needs the `edit_profile` channel right (`*` wildcard,
+  admins pass).
+- Publish detail: a Delivery card renders `summary.delivery` (transport, status pill, detail, files, time) with
+  "Deliver now" for SFTP and email channels (409 shown as a clear message pointing at the Transport tab); a Walmart
+  feeds card renders `summary.walmart` (feed ids, status, next poll, poll count) with "Poll now" calling the feedback
+  endpoint without a file; the items table gains a Listing quality column when any item carries a score.
+- Channel Health tab: "Listing quality avg" pill and "Feeds in progress" count when the response carries them.
+- Package detail: files show their kind (`matrixify` highlighted, D-13); the Shopify sandbox section offers "Plan
+  only" and "Run against sandbox" (confirm dialog), shows 409 as "Sandbox store not configured" with the two env var
+  names, and renders the SandboxReport (store, mode, product count, mutations table, protected-fields check table with
+  changed rows in red, errors list, time). The stored `sandbox_report` is shown on load.
+
+### Phase 5 contract assumptions
+
+- `GET /api/channels/{code}/transport` is expected to return the full `ChannelTransport`; missing optional blocks
+  (`sftp`, `email`, `walmart`, `rithum`) are treated as `null` and `feed_columns` as `[]`. The PUT sends the whole
+  draft, including blocks for transports not currently selected, so switching transport does not lose settings.
+- Feed column sources for the core identifiers are sent with the `core.` prefix (`core.style_number`, ...), as the
+  Phase 5 contract lists; `erp.<field>` and dotted reference paths are typed through the "Reference path" option.
+- The header columns of a stored template are only known after an upload in the current session (the GET does not
+  return them); "Columns from template" keeps the source of existing rows whose header matches and adds the rest with
+  an empty source.
+- `Publish.summary.delivery`, `summary.walmart` and `summary.listing_quality` are read with type guards from the
+  untyped summary; `listing_quality` per item falls back to `summary.listing_quality[external_id]` when the items
+  endpoint does not carry it.
+- "Deliver now" is offered when the channel transport (from GET transport, falling back to `channel.config.transport`)
+  is `sftp` or `email`, or when a previous delivery used one of them; the server's 409 is shown inline otherwise.
+- The Walmart adapter is detected as `adapter === "walmart_mp"` (or containing "walmart"); Rithum as the adapter
+  containing "rithum". A section is also shown when the server already returns the matching block.
+- `POST /api/packages/{id}/sandbox-run` is allowed from the UI only when the package is `ready` or `reconciled`;
+  executed runs refetch the package to pick up the stored `sandbox_report`.
 
 ## Grid keyboard reference (DM-03)
 

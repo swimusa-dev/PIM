@@ -11,7 +11,7 @@ from sqlalchemy import select
 from pim.adapters.base import NotConfigured
 from pim.adapters.shopify_admin import ShopifyAdminClient, ShopifySnapshot, parse_product_csv
 from pim.api.deps import CurrentUser, Metadata, Session, get_current_user, get_meta, get_session
-from pim.api.schemas import PackageBody
+from pim.api.schemas import PackageBody, SandboxRunBody
 from pim.config import get_settings
 from pim.export.shopify_package import apply_review_workbook, build_package, reconcile
 from pim.models import UpdatePackage
@@ -32,7 +32,8 @@ def _pkg_out(p: UpdatePackage, with_rows: bool = False) -> dict:
          "snapshot_at": p.snapshot_at.isoformat() if p.snapshot_at else None, "products": p.product_count,
          "changes": p.change_count, "files": [{"name": f["name"], "size": f["size"], "kind": f["kind"]} for f in (p.files or [])],
          "summary": _summary_out(p.summary or {}), "selection": p.selection or {}, "error": p.error,
-         "reconciled_at": p.reconciled_at.isoformat() if p.reconciled_at else None, "downloads": p.downloads or []}
+         "reconciled_at": p.reconciled_at.isoformat() if p.reconciled_at else None, "downloads": p.downloads or [],
+         "sandbox_report": (p.summary or {}).get("sandbox_report")}
     if with_rows:
         d["rows"] = [{"id": r.id, "entity_id": r.entity_id, "handle": r.handle, "title": r.title, "scope": r.scope,
                       "variant_key": r.variant_key, "field": r.field, "attribute_code": r.attribute_code,
@@ -188,3 +189,47 @@ async def reconcile_package(package_id: str, file: UploadFile | None = None, ses
     counts = reconcile(pkg, fresh)
     session.commit()
     return {"counts": counts, **_pkg_out(pkg, with_rows=True)}
+
+
+@router.post("/{package_id}/sandbox-run")
+def sandbox_run(package_id: str, body: SandboxRunBody | None = None, session: Session = Depends(get_session),
+                meta: Metadata = Depends(get_meta), user: CurrentUser = Depends(get_current_user)) -> dict:
+    """D-03: exercise the EXP-07 write path (targeted mutations, protected fields untouched) against the sandbox
+    store only. The production flag stays off; `plan_only` never calls Shopify."""
+    pkg = session.get(UpdatePackage, package_id)
+    if pkg is None:
+        raise HTTPException(404, "Package not found")
+    _require_run_right(user, pkg.channel_code)
+    channel = meta.channels.get(pkg.channel_code)
+    protected = list(channel.protected_fields or []) if channel else []
+    rows = [{"handle": r.handle, "scope": r.scope, "field": r.field, "proposed_value": r.proposed_value, "is_clear": r.is_clear,
+             "variant_key": r.variant_key, "include": r.include} for r in pkg.rows]
+    plan = ShopifyAdminClient.plan_mutations(rows, protected)
+    plan_only = body.plan_only if body else True
+    report = {"store": None, "mode": "plan" if plan_only else "executed", "products": len({m["handle"] for m in plan}), "mutations": plan,
+              "protected_check": [], "errors": [], "at": utcnow().isoformat()}
+    if plan_only:
+        report["store"] = get_settings().shopify_sandbox_domain
+        pkg.summary = {**(pkg.summary or {}), "sandbox_report": report}
+        session.commit()
+        return report
+    try:
+        client = ShopifyAdminClient.sandbox_client()
+    except NotConfigured as exc:
+        raise HTTPException(409, str(exc)) from exc
+    report["store"] = client.store
+    handles = sorted({m["handle"] for m in plan})
+    before = {h: client.read_protected(h, protected) for h in handles}
+    try:
+        client.execute_plan(plan)
+    except Exception as exc:  # noqa: BLE001
+        report["errors"].append(f"{type(exc).__name__}: {str(exc)[:300]}")
+    after = {h: client.read_protected(h, protected) for h in handles}
+    for h in handles:
+        for key in sorted(set(before[h]) | set(after[h])):
+            report["protected_check"].append({"handle": h, "field": key, "before": before[h].get(key), "after": after[h].get(key),
+                                              "unchanged": before[h].get(key) == after[h].get(key)})
+    report["errors"] += [f"{m['handle']}: {m['kind']} {m.get('message')}" for m in plan if m["status"] == "error"]
+    pkg.summary = {**(pkg.summary or {}), "sandbox_report": report}
+    session.commit()
+    return report

@@ -299,6 +299,31 @@ stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves th
 
 ---
 
+## 8d. Marketplaces and retailer feeds (EXP-08 to EXP-11), Matrixify and the Shopify sandbox (Phase 5)
+
+1. **Secrets**: add `walmart-client-id`, `walmart-client-secret` and `shopify-sandbox-token` to the secret scope;
+   the bundle binds them as app resources. SFTP passwords or private keys for retailer deliveries are app secret
+   resources too, named on the channel transport (`secret_name`).
+2. **Rithum (Nordstrom drop-ship and Target+, D-01 and D-02)**: under **Admin > Channels > Transport** upload the
+   program's catalog template from the Rithum account (XLSX or CSV); the header columns become feed columns. Map
+   each column to an attribute, a core field, `image:1..n`, `gtin`, `nrf_color` or `nrf_size` (GS1 NRF codes ride on
+   the option value's `nrf` channel mapping, Admin > Option lists), set case transforms and always-include flags, and
+   choose the transport (download, SFTP or email). Target+ keeps `family_rules` on: one invalid child fails the
+   family. Until the real templates are uploaded the default columns are placeholders marked UNCONFIRMED.
+3. **Walmart (EXP-08)**: load the MP_ITEM spec for the product type (Admin > Channels > Target schema), set the spec
+   version, item limit and up to three variant attribute names on the Transport tab, and keep
+   `PIM_FEATURE_CHANNEL_SEND=false` until the sandbox account answers. Publishes then build and validate the feeds
+   without sending. With the flag on, the `pim_channel_export` job polls feed status on Walmart's cadence and pulls
+   Listing Quality scores into the channel health view.
+4. **Matrixify (D-13)**: every Shopify package now includes `matrixify.xlsx`; the native CSVs remain.
+5. **Shopify sandbox (D-03)**: set `PIM_SHOPIFY_SANDBOX_DOMAIN` to the development store and bind its token. On a
+   package, **Shopify sandbox > Plan only** shows the targeted mutations; **Run against sandbox** executes them on
+   the development store and reports the protected metafields before and after. Production writes stay off until the
+   owner decides on the report.
+6. **Roles (D-05)**: assign `merch_lead` to merchandising leads who may see cost and margin.
+
+---
+
 ## 9. Images from Air (IMG-01 to IMG-07)
 
 Set `PIM_AIR_WORKSPACE_ID` and `PIM_AIR_BOARDS` (comma-separated board ids to poll) in `app.yaml`, keep the API

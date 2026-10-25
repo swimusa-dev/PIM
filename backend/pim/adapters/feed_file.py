@@ -41,9 +41,11 @@ def transform_case(value: str | None, mode: str) -> str | None:
 class FeedFileAdapter:
     name = "feed_file"
 
-    def __init__(self, columns: list[FeedColumn], template_path: str | None = None, header_row: int = 1) -> None:
+    def __init__(self, columns: list[FeedColumn], template_path: str | None = None, header_row: int = 1,
+                 template_bytes: bytes | None = None) -> None:
         self.columns = columns
         self.template_path = template_path
+        self.template_bytes = template_bytes  # a template read from a UC Volume (EXP-09)
         self.header_row = header_row
 
     def render_rows(self, products: Iterable[dict]) -> list[dict[str, str | None]]:
@@ -51,7 +53,7 @@ class FeedFileAdapter:
         for p in products:
             row: dict[str, str | None] = {}
             for c in self.columns:
-                raw = p.get(c.source)
+                raw = c.source[6:] if c.source.startswith("const:") else p.get(c.source)
                 if isinstance(raw, list):
                     raw = ", ".join(str(x) for x in raw)
                 val = None if raw is None else str(raw)
@@ -75,8 +77,8 @@ class FeedFileAdapter:
 
     def to_xlsx(self, products: Iterable[dict]) -> bytes:
         rows = self.render_rows(products)
-        if self.template_path:
-            wb = load_workbook(self.template_path)  # preserves formatting, header rows, data validation
+        if self.template_path or self.template_bytes:
+            wb = load_workbook(io.BytesIO(self.template_bytes) if self.template_bytes else self.template_path)  # preserves formatting, header rows, data validation
             ws = wb.active
             headers = {str(c.value).strip(): c.column for c in ws[self.header_row] if c.value}
             for i, r in enumerate(rows, start=self.header_row + 1):

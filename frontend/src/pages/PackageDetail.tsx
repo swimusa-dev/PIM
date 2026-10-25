@@ -1,13 +1,15 @@
-// EXP-13: Package detail. Status, snapshot time, summary counts, review rows (display only; the
-// editable workbook is the XLSX), file downloads, review workbook upload, reconcile result.
+// EXP-13, Phase 5 D-03, D-13: Package detail. Status, snapshot time, summary counts, review rows (display only;
+// the editable workbook is the XLSX), file downloads (now with the file kind, including matrixify.xlsx), review
+// workbook upload, reconcile result, and the Shopify sandbox section: "Plan only" and "Run against sandbox"
+// (POST /api/packages/{id}/sandbox-run, 409 shown as "Sandbox store not configured") with the SandboxReport view.
 
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api/client";
-import { AiBadge, ApprovalBadge, Badge, Empty, ErrorBox, Spinner, StatusBadge, useToast } from "../components/Common";
+import { ApiError, api } from "../api/client";
+import { AiBadge, ApprovalBadge, Badge, Confirm, Empty, ErrorBox, Spinner, StatusBadge, useToast } from "../components/Common";
 import { clipboardValue, formatBytes, formatDate } from "../lib/format";
-import type { PackageRow, ReconcileResult } from "../api/types";
+import type { PackageRow, ReconcileResult, SandboxReport } from "../api/types";
 
 const RECONCILE_LABEL: Record<ReconcileResult, string> = {
   applied: "Applied",
@@ -187,6 +189,7 @@ export function PackageDetailPage() {
                           {f.name}
                         </a>
                       </td>
+                      <td>{f.kind ? <Badge color={f.kind === "matrixify" ? "teal" : undefined}>{f.kind}</Badge> : null}</td>
                       <td className="num muted">{formatBytes(f.size)}</td>
                     </tr>
                   ))}
@@ -262,6 +265,8 @@ export function PackageDetailPage() {
         </div>
       </div>
 
+      <SandboxSection packageId={p.id} stored={p.sandbox_report ?? null} ready={p.status === "ready" || p.status === "reconciled"} />
+
       <div className="panel">
         <div className="panel-header">
           <h3>Review rows</h3>
@@ -333,6 +338,211 @@ export function PackageDetailPage() {
             </table>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Phase 5 (D-03): Shopify sandbox write path, production flag off ----
+function SandboxSection({ packageId, stored, ready }: { packageId: string; stored: SandboxReport | null; ready: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirmRun, setConfirmRun] = useState(false);
+  const run = useMutation({
+    mutationFn: (planOnly: boolean) => api.packages.sandboxRun(packageId, planOnly),
+    onSuccess: (r) => {
+      setConfirmRun(false);
+      toast(r.mode === "plan" ? `Plan built: ${r.mutations.length} mutation${r.mutations.length === 1 ? "" : "s"} for ${r.products} product${r.products === 1 ? "" : "s"}.` : `Sandbox run finished on ${r.store}: ${r.errors.length === 0 ? "no errors" : `${r.errors.length} error${r.errors.length === 1 ? "" : "s"}`}.`, r.errors.length === 0 ? "ok" : "warn");
+      if (r.mode === "executed") qc.invalidateQueries({ queryKey: ["packages"] });
+    },
+    onError: (e) => {
+      setConfirmRun(false);
+      if (!(e instanceof ApiError && e.status === 409)) toast(`Sandbox run failed: ${(e as Error).message}`, "error");
+    },
+  });
+  const notConfigured = run.error instanceof ApiError && run.error.status === 409;
+  const report = run.data ?? stored;
+  const fromThisRun = !!run.data;
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3>
+          Shopify sandbox <Badge color="amber" title="The production write path stays off (D-03); runs only touch the sandbox store">sandbox only</Badge>
+        </h3>
+        <div className="row">
+          <button className="small" disabled={!ready || run.isPending} title="Build the targeted-mutation plan from the included rows without writing anything" onClick={() => run.mutate(true)}>
+            {run.isPending && run.variables === true ? "Planning" : "Plan only"}
+          </button>
+          <button className="primary small" disabled={!ready || run.isPending} title="Run the plan against the sandbox store and check the protected fields before and after" onClick={() => setConfirmRun(true)}>
+            {run.isPending && run.variables === false ? "Running" : "Run against sandbox"}
+          </button>
+        </div>
+      </div>
+      <div className="panel-body stack gap16">
+        <span className="muted small">
+          Builds productUpdate, metafieldsSet (batches of 25) and productVariantsBulkUpdate mutations from the included rows, never touching the channel's protected fields. The
+          real run reads the protected metafields before and after and stores the report here.
+        </span>
+        {!ready && <span className="faint small">The package must be ready (or reconciled) before a sandbox run.</span>}
+        {notConfigured && (
+          <div className="banner warn" style={{ borderRadius: "var(--radius)" }}>
+            Sandbox store not configured. Set <span className="mono">PIM_SHOPIFY_SANDBOX_DOMAIN</span> and <span className="mono">PIM_SHOPIFY_SANDBOX_TOKEN</span> on the app, then try again.
+          </div>
+        )}
+        {run.isError && !notConfigured && <ErrorBox error={run.error} title="Sandbox run failed" />}
+        {report ? (
+          <SandboxReportView report={report} stored={!fromThisRun} />
+        ) : (
+          <Empty title="No sandbox report yet">Plan only shows what would be sent; Run against sandbox executes it on the sandbox store and keeps the report on this package.</Empty>
+        )}
+      </div>
+      {confirmRun && (
+        <Confirm
+          title="Run against the sandbox store"
+          confirmLabel="Run against sandbox"
+          busy={run.isPending}
+          onCancel={() => setConfirmRun(false)}
+          onConfirm={() => run.mutate(false)}
+          message={
+            <div className="stack">
+              <p style={{ margin: 0 }}>This executes the mutations for every included row on the Shopify sandbox store (not production). Protected fields are read before and after and reported below.</p>
+              <p className="muted small" style={{ margin: 0 }}>The production write path stays off; this is the D-03 rehearsal only.</p>
+            </div>
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function MutationStatusBadge({ status }: { status: SandboxReport["mutations"][number]["status"] }) {
+  const color = status === "ok" ? "green" : status === "error" ? "red" : "blue";
+  return <Badge color={color}>{status}</Badge>;
+}
+
+function sandboxValue(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "";
+  return clipboardValue(v);
+}
+
+export function SandboxReportView({ report, stored }: { report: SandboxReport; stored: boolean }) {
+  const changed = report.protected_check.filter((c) => !c.unchanged).length;
+  const errors = report.mutations.filter((m) => m.status === "error").length;
+  return (
+    <div className="stack gap16">
+      <dl className="kv">
+        <dt>Store</dt>
+        <dd className="mono">{report.store || <span className="faint">unknown</span>}</dd>
+        <dt>Mode</dt>
+        <dd>
+          <Badge color={report.mode === "executed" ? "green" : "blue"}>{report.mode === "executed" ? "executed" : "plan"}</Badge>{" "}
+          {stored && <span className="faint small">(stored report from the last run)</span>}
+        </dd>
+        <dt>Products</dt>
+        <dd>{report.products}</dd>
+        <dt>Time</dt>
+        <dd>{formatDate(report.at)}</dd>
+      </dl>
+
+      <div>
+        <div className="muted small mb8">
+          Mutations ({report.mutations.length}){errors > 0 && <Badge color="red" title="Mutations that failed">{errors} failed</Badge>}
+        </div>
+        {report.mutations.length === 0 ? (
+          <span className="faint small">No mutations: the included rows produce nothing to send.</span>
+        ) : (
+          <div style={{ maxHeight: 320, overflow: "auto" }}>
+            <table className="data compact">
+              <thead>
+                <tr>
+                  <th>Kind</th>
+                  <th>Handle</th>
+                  <th>Fields</th>
+                  <th>Status</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.mutations.map((m, i) => (
+                  <tr key={i}>
+                    <td className="mono">{m.kind}</td>
+                    <td className="mono">{m.handle}</td>
+                    <td>
+                      {m.fields.length === 0 ? (
+                        <span className="faint">none</span>
+                      ) : (
+                        <div className="chips">
+                          {m.fields.map((f) => (
+                            <Badge key={f}>
+                              <span className="mono">{f}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <MutationStatusBadge status={m.status} />
+                    </td>
+                    <td className="small">{m.message ?? <span className="faint">none</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="muted small mb8">
+          Protected fields check ({report.protected_check.length}){" "}
+          {report.protected_check.length > 0 && (changed === 0 ? <Badge color="green">all unchanged</Badge> : <Badge color="red">{changed} changed</Badge>)}
+        </div>
+        {report.protected_check.length === 0 ? (
+          <span className="faint small">{report.mode === "plan" ? "Protected fields are checked when the plan is executed." : "No protected fields were read."}</span>
+        ) : (
+          <div style={{ maxHeight: 320, overflow: "auto" }}>
+            <table className="data compact">
+              <thead>
+                <tr>
+                  <th>Handle</th>
+                  <th>Field</th>
+                  <th>Before</th>
+                  <th>After</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.protected_check.map((c, i) => (
+                  <tr key={i} className={c.unchanged ? "" : "protected-changed"}>
+                    <td className="mono">{c.handle}</td>
+                    <td className="mono">{c.field}</td>
+                    <td className="pre" style={{ maxWidth: 260 }}>
+                      {sandboxValue(c.before) || <span className="faint">(empty)</span>}
+                    </td>
+                    <td className="pre" style={{ maxWidth: 260 }}>
+                      {sandboxValue(c.after) || <span className="faint">(empty)</span>}
+                    </td>
+                    <td>{c.unchanged ? <Badge color="green">unchanged</Badge> : <Badge color="red">changed</Badge>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="muted small mb8">Errors ({report.errors.length})</div>
+        {report.errors.length === 0 ? (
+          <span className="faint small">No errors.</span>
+        ) : (
+          <ul className="small" style={{ margin: 0, paddingLeft: 18, color: "var(--red)" }}>
+            {report.errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

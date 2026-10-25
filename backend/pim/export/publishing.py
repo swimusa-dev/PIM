@@ -156,7 +156,7 @@ def execute_run(session: Session, meta: Metadata, channel: Channel, rec: Publish
         payloads = build_payloads(session, meta, channel, entities, schema, rends)
         valid = [p for p in payloads if p.valid]
         rec.product_count, rec.valid_count, rec.invalid_count = len(payloads), len(valid), len(payloads) - len(valid)
-        files = payload_files(channel, payloads, schema)
+        files = payload_files(channel, payloads, schema, template_bytes_for(channel))
         rec.payload_path = st.path("publishes", rec.id)
         rec.files = []
         for name, content, kind in files:
@@ -217,28 +217,73 @@ def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord
         for p in valid:
             items[p.entity_id].status = "submitted"
         return
+    if transport in ("sftp", "email"):
+        # EXP-09: file delivery through the channel transport; a failed delivery keeps the publish and its files
+        rec.status = "completed"
+        result = deliver_publish(session, channel, rec) if send else {"transport": transport, "status": "skipped", "detail": "dry run"}
+        for p in valid:
+            items[p.entity_id].status = "submitted" if result.get("status") == "delivered" else items[p.entity_id].status
+        return
     if transport == "download" or not send or not getattr(get_settings(), "feature_channel_send", False):
         rec.status = "completed"
-        rec.summary = {**(rec.summary or {}), "delivery": "download" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"}
+        rec.summary = {**(rec.summary or {}), "delivery": {"transport": transport, "status": "skipped", "at": utcnow().isoformat(), "files": [],
+                                                           "detail": "download transport" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"}}
         return
     adapter = adapter_for(channel)
     try:
-        res = adapter.publish([p.data for p in valid], dry_run=False)
+        if channel.adapter == "walmart_mp":
+            res = _send_walmart(channel, adapter, valid)
+        else:
+            res = adapter.publish([p.data for p in valid], dry_run=False)
     except NotConfigured as exc:
         rec.status, rec.error = "failed", str(exc)
         return
     rec.external_batch_id = res.batch_id
     rec.status = "submitted"
-    rec.summary = {**(rec.summary or {}), "delivery": {"batch_id": res.batch_id, "accepted": res.accepted, "rejected": res.rejected, **res.detail}}
+    now = utcnow()
+    rec.summary = {**(rec.summary or {}), "delivery": {"transport": "api", "status": "delivered", "at": now.isoformat(), "files": [],
+                                                       "detail": f"batch {res.batch_id}: {res.accepted} item(s) submitted", "batch_id": res.batch_id,
+                                                       "accepted": res.accepted, "rejected": res.rejected, **res.detail}}
+    if channel.adapter == "walmart_mp":
+        from pim.adapters.walmart_mp import next_poll_at
+
+        rec.summary = {**rec.summary, "walmart": {"feed_ids": res.detail.get("feed_ids", []), "status": "submitted", "polls": 0,
+                                                  "next_poll_at": next_poll_at(0, now).isoformat(), "spec_version": res.detail.get("spec_version")}}
     for p in valid:
         items[p.entity_id].status = "submitted"
 
 
+def _send_walmart(channel: Channel, adapter, valid: list[ProductPayload]):  # noqa: ANN001, ANN202
+    """EXP-08: nest each payload into Orderable and Visible, group variants per style [C12], validate, submit."""
+    from pim.export.payloads import nest
+    from pim.export.schema_loaders import TargetSchema
+
+    schema = TargetSchema.from_dict(channel.target_schema)
+    w = (channel.config or {}).get("walmart") or {}
+    items = []
+    for p in valid:
+        nested = nest(p.data, schema)
+        items.append({"orderable": nested.get("Orderable", {}), "visible": nested.get("Visible", {}),
+                      "variant_group": p.external_id.split("-")[0] if p.external_id else None, "_entity_id": p.entity_id})
+    adapter.group_variants(items, w.get("variant_attribute_names") or [])
+    check = adapter.validate(items)
+    if not check.ok:
+        raise NotConfigured("Walmart variant group validation failed: " + "; ".join(e["message"] for e in check.errors[:5]))
+    return adapter.publish(items, dry_run=False)
+
+
 def adapter_for(channel: Channel):  # noqa: ANN201
+    cfg = channel.config or {}
     if channel.adapter == "walmart_mp":
         from pim.adapters.walmart_mp import WalmartMarketplaceAdapter
 
-        return WalmartMarketplaceAdapter()
+        w = cfg.get("walmart") or {}
+        return WalmartMarketplaceAdapter(spec_version=str(w.get("spec_version") or cfg.get("spec_version") or "5.0"),
+                                         max_items_per_feed=int(w.get("max_items_per_feed") or cfg.get("max_items_per_feed") or 5000))
+    if channel.adapter == "rithum":
+        from pim.adapters.rithum import rithum_for_channel
+
+        return rithum_for_channel(channel)
     if channel.adapter == "mirakl_seller":
         from pim.adapters.mirakl_seller import MiraklSellerAdapter
 
@@ -248,6 +293,28 @@ def adapter_for(channel: Channel):  # noqa: ANN201
 
         return TargetPlusAdapter()
     raise NotConfigured(f"No API adapter for {channel.adapter}")
+
+
+def template_bytes_for(channel: Channel) -> bytes | None:
+    path = (channel.config or {}).get("feed_template_path")
+    if not path:
+        return None
+    try:
+        return storage().read(path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("feed template for %s unreadable at %s: %s", channel.code, path, exc)
+        return None
+
+
+def deliver_publish(session: Session, channel: Channel, rec: PublishRecord) -> dict:
+    """EXP-09: send the publish's payload files through the channel transport (SFTP or email) and record the result."""
+    from pim.services.delivery import deliver
+
+    st = storage()
+    files = [(f["name"], st.read(f["path"])) for f in (rec.files or []) if f.get("kind") == "payload" and f.get("path")]
+    result = deliver(channel, files)
+    rec.summary = {**(rec.summary or {}), "delivery": result}
+    return result
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -384,16 +451,57 @@ def apply_feedback(session: Session, meta: Metadata, channel: Channel, rec: Publ
             "in_review": counts.get("in_review", 0), "unmatched": counts.get("unmatched", 0)}
 
 
-def poll_feedback(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord) -> dict[str, int]:
+def poll_feedback(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord, force: bool = True) -> dict[str, int]:
     if not rec.external_batch_id:
         raise NotConfigured("This publish has no retailer batch id to poll; upload the retailer's error report instead")
     adapter = adapter_for(channel)
+    if channel.adapter == "walmart_mp":
+        return _poll_walmart(session, meta, channel, adapter, rec, force)
     status = adapter.fetch_status(rec.external_batch_id)
     errors = adapter.fetch_errors(rec.external_batch_id)
     rows = [_norm_row(e) for e in errors]
     for it in status.get("items", []) if isinstance(status, dict) else []:
         rows.append(_norm_row(it))
     return apply_feedback(session, meta, channel, rec, rows, source="adapter")
+
+
+def walmart_poll_due(rec: PublishRecord, now: datetime | None = None) -> bool:
+    w = (rec.summary or {}).get("walmart") or {}
+    nxt = w.get("next_poll_at")
+    if w.get("status") == "complete":
+        return False
+    return not nxt or datetime.fromisoformat(nxt) <= (now or utcnow())
+
+
+def _poll_walmart(session: Session, meta: Metadata, channel: Channel, adapter, rec: PublishRecord, force: bool) -> dict[str, int]:  # noqa: ANN001
+    """EXP-08 [C14][C15]: poll every feed of the publish, store item statuses and ingestion errors (a PROCESSED feed
+    can still hold INPROGRESS items), schedule the next poll on Walmart's cadence, and pull Listing Quality scores."""
+    from pim.adapters.walmart_mp import next_poll_at
+
+    w = dict((rec.summary or {}).get("walmart") or {"feed_ids": [rec.external_batch_id], "polls": 0})
+    now = utcnow()
+    if not force and not walmart_poll_due(rec, now):
+        return {"updated": 0, "accepted": 0, "rejected": 0, "in_review": 0, "unmatched": 0, "skipped": "not due"}
+    rows: list[dict] = []
+    all_complete = True
+    feed_status: dict[str, str] = {}
+    for fid in w.get("feed_ids") or [rec.external_batch_id]:
+        st = adapter.fetch_status(fid)
+        feed_status[fid] = st.get("status", "")
+        all_complete = all_complete and bool(st.get("complete"))
+        for it in st.get("items", []):
+            rows.append({"external_id": it.get("external_id"), "status": it.get("status"), "message": it.get("message") or "",
+                         "field": it.get("field")})
+    result = apply_feedback(session, meta, channel, rec, rows, source="walmart")
+    w["polls"] = int(w.get("polls", 0)) + 1
+    w["feed_status"] = feed_status
+    w["last_poll_at"] = now.isoformat()
+    w["status"] = "complete" if all_complete else "in_progress"
+    w["next_poll_at"] = None if all_complete else next_poll_at(w["polls"], now).isoformat()
+    skus = [i.external_id for i in session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars() if i.external_id]
+    scores = adapter.listing_quality(skus) if skus else {}
+    rec.summary = {**(rec.summary or {}), "walmart": w, "listing_quality": {**((rec.summary or {}).get("listing_quality") or {}), **scores}}
+    return result
 
 
 def _notify_owners(session: Session, channel: Channel, rec: PublishRecord, rejected: list[PublishItem], ents: dict) -> None:
@@ -427,7 +535,10 @@ def channel_health(session: Session, channel: Channel, days: int = 30) -> dict:
             errs[e["message"]] += 1
             kinds[e["message"]] = e.get("kind", "external")
     last = max((r.created_at for r in recs), default=None)
+    lq = [v for r in recs for v in ((r.summary or {}).get("listing_quality") or {}).values() if isinstance(v, (int, float))]
+    feeds_in_progress = sum(1 for r in recs if ((r.summary or {}).get("walmart") or {}).get("status") == "in_progress")
     return {"channel_code": channel.code, "publishes": len(recs), "products_sent": sum(r.product_count for r in recs),
+            "listing_quality_avg": round(sum(lq) / len(lq), 1) if lq else None, "feeds_in_progress": feeds_in_progress,
             "accepted": accepted, "rejected": rejected, "in_review": st.get("in_review", 0), "health_score": score,
             "last_publish_at": last.isoformat() if last else None,
             "last_success_at": (lambda d: d.isoformat() if d else None)(last_success_at(session, channel.code)),
