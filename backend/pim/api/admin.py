@@ -10,6 +10,7 @@ from pim.api.schemas import UserRoleBody
 from pim.auth.identity import require_permission
 from pim.models import AppEvent, BrandScope, ErpDefect, JobRun, ProductEntity, ProductValue, Role, UserRole
 from pim.services.jobs import trigger_job
+from pim.services.telemetry import adapter_error_rates
 
 router = APIRouter(prefix="/api", tags=["admin"])
 
@@ -123,6 +124,7 @@ def telemetry(session: Session = Depends(get_session), user: CurrentUser = Depen
             "adapter_errors": [{"adapter": e.source or "", "at": e.at.isoformat(), "message": str((e.payload or {}).get("error", ""))}
                                for e in session.execute(select(AppEvent).where(AppEvent.kind == "adapter_error")
                                                         .order_by(AppEvent.at.desc()).limit(50)).scalars()],
+            "adapter_error_rates": adapter_error_rates(session),
             "ai_spend": {"calls": len(ai_events),
                          "input_tokens": sum(int((p or {}).get("prompt_tokens", 0)) for p in ai_events),
                          "output_tokens": sum(int((p or {}).get("completion_tokens", 0)) for p in ai_events)},

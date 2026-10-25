@@ -168,13 +168,14 @@ export function GradeBar({ counts, title }: { counts: Record<"A" | "B" | "C" | "
 export function readinessTip(r: Readiness | undefined): string {
   if (!r) return "No readiness computed";
   if (!r.eligible) return "Not eligible for this channel";
-  if (r.ready) return "Ready";
+  if (r.ready) return r.warnings?.length ? ["Ready", ...r.warnings.map((w) => `Warning: ${w}`)].join("\n") : "Ready";
   const lines: string[] = [];
   if (r.missing_attributes.length) lines.push(`Missing attributes: ${r.missing_attributes.join(", ")}`);
   if (r.missing_shots.length) lines.push(`Missing shots: ${r.missing_shots.join(", ")}`);
   if (r.mapping_gaps.length) lines.push(`Mapping gaps: ${r.mapping_gaps.join(", ")}`);
   if (r.invalid.length) lines.push(`Invalid after transform: ${r.invalid.join(", ")}`);
   if (r.reasons.length) lines.push(...r.reasons);
+  if (r.warnings?.length) lines.push(...r.warnings.map((w) => `Warning: ${w}`));
   return lines.join("\n") || "Not ready";
 }
 

@@ -32,6 +32,7 @@ from pim.api import (
     products,
     quality,
     reference,
+    relationships,
     views,
     workflows,
 )
@@ -66,7 +67,7 @@ def create_app() -> FastAPI:
         return response
 
     for r in (health, metadata, workflows, products, views, approvals, packages, reference, dashboard, admin, imports, bulk,
-              exports, images, ai, quality):
+              exports, images, ai, quality, relationships):
         app.include_router(r.router)
 
     @app.on_event("startup")

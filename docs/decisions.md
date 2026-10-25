@@ -28,6 +28,15 @@ marker (`grep -rn "TODO(decision" backend seeds`).
 4. Shopify direct write path exercised against a development store with a report, flag still off (D-03).
 5. `merch_lead` role with cost visibility (D-05).
 
+## Phase 6 scope (the closing phase, 2026-10-25)
+
+The spec's build order ends at Phase 5. Phase 6 closes every requirement still marked Partial, Seam or Not started
+that can be finished without the Swim USA workspace: DM-13 relationships (for retailer feeds only; Shopify cross-sell
+stays with Layer per D-09), GOV-02 whole-product restore, change-set rollback for any set and hot history retention,
+the DM-07 and DM-09 digest actually emailed, the IMP-02 AI suggester behind a flag, GOV-04 adapter error rates, and the
+Mirakl and Target+ stubs rewritten for the resolved D-01 and D-02. Items that need the workspace (PLT-00 spikes, the
+group role mapper, UC app telemetry, credentials) stay open and are listed in `docs/requirements-coverage.md`.
+
 ## Decisions made during the build (not in the spec)
 
 | Topic | Choice | Why |

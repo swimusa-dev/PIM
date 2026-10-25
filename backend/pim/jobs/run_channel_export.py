@@ -20,6 +20,7 @@ def main() -> None:
     from pim.export import publishing
     from pim.models import Channel, PublishRecord
     from pim.services.metadata import load_metadata
+    from pim.services.telemetry import record_adapter_error
 
     p = argparse.ArgumentParser()
     p.add_argument("--channel-code", default="")
@@ -48,6 +49,10 @@ def main() -> None:
                 report["feedback"][rec.id] = publishing.poll_feedback(s, meta, ch, rec, force=False)  # Walmart: 15 min, 1 h, 2 h, then 4 h
             except (NotConfigured, NotImplementedError) as exc:
                 report["feedback"][rec.id] = {"skipped": str(exc)[:200]}
+            except Exception as exc:  # noqa: BLE001
+                log.exception("feedback poll for %s failed", rec.id)
+                record_adapter_error(s, ch.code, exc, {"publish_id": rec.id, "adapter": ch.adapter, "op": "poll"})
+                report["feedback"][rec.id] = {"error": str(exc)[:200]}
             s.commit()
         mark_job_run(s, "succeeded", report)
 

@@ -443,10 +443,18 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
                 variants_by_parent.setdefault(parent_id, []).append({"sku": sku.sku, "upc": sku.upc, "size": sku.size,
                                                                      "nrf_size": nrf_code(opt, "size") if opt is not None else None,
                                                                      "entity_id": sku.id})
+    related_types = [c["source"].split(":", 1)[1] for c in feed_cols if str(c.get("source") or "").startswith("related:")]
+    related_map: dict[str, dict[str, list[str]]] = {}
+    if related_types and entities:
+        from pim.services.relationships import related_external_ids_for
+
+        related_map = related_external_ids_for(session, entities, related_types)  # DM-13 for EXP-09, one pass for the run
     for ent in entities:
         style = styles.get(ent.parent_id or "")
         merged = merged_values(values, ent, style)
         p = ProductPayload(entity_id=ent.id, label=ent.label, external_id=_external_id(ent, style, channel), style_number=ent.style_number)
+        if related_types:
+            p.feed["_related"] = related_map.get(ent.id, {})
         flat: dict[str, Any] = {name: _core(ent, style, name) for name in CORE_FIELDS}
         for (code, ch), pv in merged.items():
             if ch in ("", channel.code) and pv.approval_state == "approved":
@@ -578,6 +586,8 @@ def _render_feed(meta: Metadata, channel: Channel, p: ProductPayload, ent: Produ
             val = None  # per variant
         elif src == "core.style_number" and flat.get("vendor_part_number"):
             val = flat["vendor_part_number"]
+        elif src.startswith("related:"):
+            val = ", ".join((p.feed.get("_related") or {}).get(src.split(":", 1)[1], []))
         else:
             v, _attr = resolve_source(meta, channel, ent, style, merged, src, refs)
             val = v

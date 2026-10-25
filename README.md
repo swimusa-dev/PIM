@@ -84,6 +84,18 @@ package adds a Matrixify workbook (D-13); the Shopify write path runs only again
 protected-fields report (D-03); and a merchandising lead role sees cost (D-05). See `docs/api-contract-phase5.md`
 and section 8d of the setup guide.
 
+## Phase 6 (closing phase)
+
+The spec's build order ends at Phase 5, so Phase 6 closes what was still Partial, Seam or Not started and can be
+built without the Swim USA workspace: product relationships with typed, directional, inherited links checked in
+readiness and exported as a feed source (DM-13, never written to Shopify per D-09); restore a whole product to a point
+in time, roll any change set back as a unit, and keep two years of history hot in Lakebase (GOV-02); the notification
+digest now emails through the SMTP settings on each user's daily, weekly or off schedule (DM-07, DM-09); AI mapping
+suggestions for import columns behind `PIM_FEATURE_AI_MAPPING_SUGGEST` (IMP-02); adapter error rates on the telemetry
+page (GOV-04); and the resolved Mirakl and Target+ stubs point at Rithum (ARC-05). See `docs/api-contract-phase6.md`
+and section 8e of the setup guide. What remains needs the workspace: the PLT-00 spikes, UC app telemetry, the group
+role mapper, and credentials for Walmart, Rithum, Air and the Shopify development store.
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status

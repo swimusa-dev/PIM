@@ -281,7 +281,11 @@ def suggest(batch_id: str, session: Session = Depends(get_session), meta: Metada
     batch = _batch_or_404(session, batch_id)
     cols = [c["name"] for f in (batch.files or []) for c in f.get("columns", [])]
     already = {s for m in (batch.mapping or []) for s in (m.get("sources") or [])}
-    return suggest_mappings(cols, meta, batch.level, already, threshold=get_settings().ai_mapping_confidence_threshold)
+    from pim.imports.ai_mapping import ai_suggester
+
+    samples = {c["name"]: [str(v) for v in (c.get("samples") or c.get("sample") or [])] for f in (batch.files or []) for c in f.get("columns", [])}
+    ai = ai_suggester(session, meta, batch.level, samples, user_email=user.email)  # None unless PIM_FEATURE_AI_MAPPING_SUGGEST
+    return suggest_mappings(cols, meta, batch.level, already, threshold=get_settings().ai_mapping_confidence_threshold, ai_suggest=ai)
 
 
 @router.put("/imports/batches/{batch_id}/mapping")

@@ -195,8 +195,13 @@ def put_transport(code: str, body: TransportBody, session: Session = Depends(get
             raise HTTPException(400, "Every feed column needs a header")
         src = str(c.get("source") or "").strip()
         base = src.split(".", 1)[0]
-        if src and not (src.startswith(("core.", "erp.", "image:", "const:")) or src in ("image_ai_flag", "nrf_color", "nrf_size", "gtin")
-                        or base in meta.attributes):
+        if src.startswith("related:"):
+            from pim.models import RelationshipType
+
+            if session.get(RelationshipType, src.split(":", 1)[1]) is None:
+                raise HTTPException(400, f"Unknown relationship type in feed column source {src!r} for {header}")
+        elif src and not (src.startswith(("core.", "erp.", "image:", "const:")) or src in ("image_ai_flag", "nrf_color", "nrf_size", "gtin")
+                          or base in meta.attributes):
             raise HTTPException(400, f"Unknown feed column source {src!r} for {header}")
         if c.get("case_transform", "as_is") not in CASE_MODES:
             raise HTTPException(400, f"case_transform for {header} must be one of {', '.join(CASE_MODES)}")

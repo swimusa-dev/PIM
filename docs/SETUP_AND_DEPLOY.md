@@ -328,6 +328,27 @@ stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves th
 
 ---
 
+## 8e. Closing phase: relationships, restore, digest email, AI mapping suggestions (Phase 6)
+
+1. **Migration**: the bootstrap job (or `alembic upgrade head`) adds `relationship_type`, `product_relationship` and
+   `user_setting`; the seed loader adds the four relationship types from `seeds/relationships.yml` with no links.
+2. **Relationships (DM-13)**: on a product page the Relationships tab links other products by type; Replaced By is
+   set on the style and inherited by its colors. Retailer feeds can carry a `related:<type>` column (Transport tab).
+   Shopify cross-sell metafields stay protected: Layer owns them (D-09).
+3. **Restore and retention (GOV-02)**: the History tab restores a whole product to a point in time and rolls any
+   change set back as a unit. Set `PIM_HISTORY_HOT_YEARS` (default 2) to choose how long history stays in Lakebase;
+   the `pim_publish_history` job prunes older rows only after they are merged into the Delta `value_history` table.
+4. **Digest email (DM-07, DM-09)**: with `PIM_SMTP_HOST` (and user, password, from) set, the nightly job emails each
+   user their unread notifications; set `PIM_APP_BASE_URL` to the app URL so the links resolve. Users choose daily,
+   weekly or off from the bell menu. Without SMTP the job logs the digest as before.
+5. **AI mapping suggestions (IMP-02)**: set `PIM_FEATURE_AI_MAPPING_SUGGEST=true` once the classify endpoint is bound
+   (section 8c); the import wizard then shows model suggestions with a confidence for columns the header matcher
+   missed. Nothing is applied without the person.
+6. **Telemetry (GOV-04)**: Admin > Telemetry shows adapter error rates over 30 days; publish failures, delivery
+   failures, feedback polls and the Air poll record `adapter_error` events with credentials scrubbed.
+
+---
+
 ## 9. Images from Air (IMG-01 to IMG-07)
 
 Set `PIM_AIR_WORKSPACE_ID` and `PIM_AIR_BOARDS` (comma-separated board ids to poll) in `app.yaml`, keep the API

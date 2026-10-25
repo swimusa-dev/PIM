@@ -1,6 +1,7 @@
 // Typed fetch helpers for every endpoint in docs/api-contract.md, docs/api-contract-phase2.md,
-// docs/api-contract-phase3.md, docs/api-contract-phase4.md (AI-01 to AI-07, GOV-03) and docs/api-contract-phase5.md
-// (EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13: channel transport, feed templates, delivery, Walmart feeds, Shopify sandbox).
+// docs/api-contract-phase3.md, docs/api-contract-phase4.md (AI-01 to AI-07, GOV-03), docs/api-contract-phase5.md
+// (EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13: channel transport, feed templates, delivery, Walmart feeds, Shopify sandbox)
+// and docs/api-contract-phase6.md (DM-13 relationships, GOV-02 restore-to and change sets, DM-07 digest settings).
 // All calls go through `request` so errors surface the server's `{detail}` message.
 
 import type {
@@ -111,6 +112,15 @@ import type {
   DeliveryResult,
   FeedTemplateUpload,
   SandboxReport,
+  ChangeSet,
+  ChangeSetList,
+  MeSettings,
+  Relationship,
+  RelationshipAddRequest,
+  RelationshipAddResult,
+  RelationshipType,
+  RestoreToResult,
+  RollbackResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -222,6 +232,9 @@ export const api = {
       post<ValueEditResponse>(
         `/api/products/${encodeURIComponent(entityId)}/history/${encodeURIComponent(historyId)}/restore`,
       ),
+    // Phase 6 (GOV-02): restore every attribute that changed after `at` to the value it held then.
+    restoreTo: (entityId: string, body: { at?: string; history_id?: string; attribute_codes?: string[] }) =>
+      post<RestoreToResult>(`/api/products/${encodeURIComponent(entityId)}/restore-to`, body),
     tree: (entityId: string) => get<ProductTree>(`/api/products/${encodeURIComponent(entityId)}/tree`),
     images: (entityId: string) => get<ProductImages>(`/api/products/${encodeURIComponent(entityId)}/images`),
   },
@@ -593,6 +606,36 @@ export const qualityApi = {
   recompute: (entityIds?: string[]) => post<{ computed: number }>("/api/quality/recompute", entityIds ? { entity_ids: entityIds } : {}),
   product: (entityId: string) => get<{ scores: QualityScore[] }>(`/api/products/${encodeURIComponent(entityId)}/quality`),
   dashboard: (by: QualityDashboardBy) => get<{ rows: QualityDashboardRow[] }>(`/api/quality/dashboard${qs({ by })}`),
+};
+
+// =================================================================================
+// Phase 6 (docs/api-contract-phase6.md)
+// =================================================================================
+
+// ---- Relationships (DM-13) ----
+export const relationshipApi = {
+  types: (includeDisabled = false) =>
+    get<RelationshipType[]>(`/api/relationship-types${qs({ include_disabled: includeDisabled ? true : undefined })}`),
+  saveType: (code: string, body: Partial<Omit<RelationshipType, "code">>) =>
+    put<RelationshipType>(`/api/relationship-types/${encodeURIComponent(code)}`, body),
+  list: (entityId: string) => get<{ rows: Relationship[] }>(`/api/products/${encodeURIComponent(entityId)}/relationships`),
+  add: (entityId: string, body: RelationshipAddRequest) =>
+    post<RelationshipAddResult>(`/api/products/${encodeURIComponent(entityId)}/relationships`, body),
+  remove: (relationshipId: string) => del<{ deleted: number }>(`/api/relationships/${encodeURIComponent(relationshipId)}`),
+};
+
+// ---- Change sets (GOV-02) ----
+export const changeSetApi = {
+  list: (params: { kind?: string; entity_id?: string; page?: number; page_size?: number } = {}) =>
+    get<ChangeSetList>(`/api/change-sets${qs(params)}`),
+  get: (id: string) => get<ChangeSet>(`/api/change-sets/${encodeURIComponent(id)}`),
+  rollback: (id: string) => post<RollbackResult>(`/api/change-sets/${encodeURIComponent(id)}/rollback`),
+};
+
+// ---- Per-user settings: digest frequency (DM-07, DM-09) ----
+export const settingsApi = {
+  get: () => get<MeSettings>("/api/me/settings"),
+  save: (body: { digest_frequency: MeSettings["digest_frequency"] }) => put<MeSettings>("/api/me/settings", body),
 };
 
 export function errorMessage(err: unknown): string {

@@ -37,6 +37,12 @@ def rollback_change_set(session: Session, meta: Metadata, user: CurrentUser, cha
         attr = meta.attributes.get(h.attribute_code)
         if entity is None or attr is None:
             continue
+        group = meta.groups.get(attr.group_code)
+        if attr.is_erp or (group is not None and group.read_only):
+            # P1: ERP-owned values are never rewritten from history, whatever the set (an ingest set is never undone)
+            manual.append({"entity_id": entity.id, "label": entity.label, "attribute_code": attr.code, "reason": "owned by the ERP and read-only in the PIM"})
+            seen.add(key)
+            continue
         pv = session.execute(select(ProductValue).where(ProductValue.entity_id == h.entity_id, ProductValue.attribute_code == h.attribute_code,
                                                         ProductValue.channel_code == (h.channel_code or ""))).scalar_one_or_none()
         latest_version = max((x.version for x in hist if (x.entity_id, x.attribute_code, x.channel_code or "") == key), default=h.version)

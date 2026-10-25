@@ -1,4 +1,5 @@
-"""Completeness and channel readiness (DM-05, EXP-03, EXP-12, GOV-06, IMG-02, AI-06 certificate warning).
+"""Completeness and channel readiness (DM-05, EXP-03, EXP-12, GOV-06, IMG-02, AI-06 certificate warning, DM-13 broken
+relationship warning).
 
 Readiness is computed for style-colors (the unit channels list) and cached in readiness_snapshot so grids
 can filter on it. Style-level and SKU-level rows report the readiness of their style-colors (min / aggregate).
@@ -80,8 +81,16 @@ def _answered(pv: ProductValue | None) -> bool:
 
 def compute_readiness(session: Session, meta: Metadata, entity: ProductEntity, channel: Channel,
                       values: dict[tuple[str, str], ProductValue] | None = None,
-                      style: ProductEntity | None = None, links: list[AssetLink] | None = None) -> Readiness:
+                      style: ProductEntity | None = None, links: list[AssetLink] | None = None,
+                      broken_relationships: list[str] | None = None) -> Readiness:
     r = Readiness(channel_code=channel.code)
+    if broken_relationships is None:
+        from pim.services.relationships import broken_links
+
+        broken_relationships = broken_links(session, [entity.id]).get(entity.id, [])
+    if broken_relationships:
+        # DM-13: a related product that is discontinued or gone is a warning on every channel, never a blocker
+        r.warnings.append(f"{len(broken_relationships)} related product(s) discontinued or missing: " + "; ".join(broken_relationships[:5]))
     if style is None and entity.parent_id:
         style = session.get(ProductEntity, entity.parent_id)
     inel = check_eligibility(channel, entity, style)
@@ -180,15 +189,16 @@ def refresh_snapshots(session: Session, meta: Metadata, entities: list[ProductEn
     links: dict[str, list[AssetLink]] = {}
     for lnk in session.execute(select(AssetLink).where(AssetLink.entity_id.in_(ids), AssetLink.status == "confirmed")).scalars():
         links.setdefault(lnk.entity_id, []).append(lnk)
+    from pim.services.relationships import broken_links
+
+    broken = broken_links(session, ids)
     now = utcnow()
     for t in targets:
         style = styles.get(t.parent_id or "")
         merged = dict(values.get(style.id, {}) if style else {})
         merged.update(values.get(t.id, {}))
         for ch in meta.channels.values():
-            if not ch.enabled and ch.kind != "dtc":
-                pass
-            r = compute_readiness(session, meta, t, ch, merged, style, links.get(t.id, []))
+            r = compute_readiness(session, meta, t, ch, merged, style, links.get(t.id, []), broken.get(t.id, []))
             session.add(ReadinessSnapshot(entity_id=t.id, channel_code=ch.code, completeness_pct=r.completeness_pct,
                                           ready=r.ready, eligible=r.eligible, detail=r.as_dict(), computed_at=now))
     session.flush()
