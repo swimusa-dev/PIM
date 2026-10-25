@@ -199,6 +199,14 @@ def _renditions_for(session: Session, channel: Channel, entities: list[ProductEn
     return out
 
 
+SEND_DISABLED = "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"
+
+
+def send_enabled() -> bool:
+    """EXP-05/EXP-09: one switch for every outbound retailer send (API feeds, SFTP uploads, emailed files)."""
+    return bool(getattr(get_settings(), "feature_channel_send", False))
+
+
 def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord, valid: list[ProductPayload],
           send: bool, user: CurrentUser | None) -> None:
     transport = (channel.config or {}).get("transport") or ("package" if channel.adapter == "shopify_admin" else "download")
@@ -218,16 +226,24 @@ def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord
             items[p.entity_id].status = "submitted"
         return
     if transport in ("sftp", "email"):
-        # EXP-09: file delivery through the channel transport; a failed delivery keeps the publish and its files
+        # EXP-09: file delivery through the channel transport; a failed delivery keeps the publish and its files.
+        # PIM_FEATURE_CHANNEL_SEND gates every outbound retailer send, file deliveries included.
         rec.status = "completed"
-        result = deliver_publish(session, channel, rec) if send else {"transport": transport, "status": "skipped", "detail": "dry run"}
+        if not send:
+            result = {"transport": transport, "status": "skipped", "detail": "dry run", "at": utcnow().isoformat(), "files": []}
+            rec.summary = {**(rec.summary or {}), "delivery": result}
+        elif not getattr(get_settings(), "feature_channel_send", False):
+            result = {"transport": transport, "status": "skipped", "detail": SEND_DISABLED, "at": utcnow().isoformat(), "files": []}
+            rec.summary = {**(rec.summary or {}), "delivery": result}
+        else:
+            result = deliver_publish(session, channel, rec)
         for p in valid:
             items[p.entity_id].status = "submitted" if result.get("status") == "delivered" else items[p.entity_id].status
         return
     if transport == "download" or not send or not getattr(get_settings(), "feature_channel_send", False):
         rec.status = "completed"
         rec.summary = {**(rec.summary or {}), "delivery": {"transport": transport, "status": "skipped", "at": utcnow().isoformat(), "files": [],
-                                                           "detail": "download transport" if transport == "download" else "send disabled (PIM_FEATURE_CHANNEL_SEND=false)"}}
+                                                           "detail": "download transport" if transport == "download" else SEND_DISABLED}}
         return
     adapter = adapter_for(channel)
     try:
@@ -263,8 +279,10 @@ def _send_walmart(channel: Channel, adapter, valid: list[ProductPayload]):  # no
     items = []
     for p in valid:
         nested = nest(p.data, schema)
+        # The variant group is the style (every color of a style is one Walmart variant group); the style number is
+        # carried on the payload because external ids are "{style}-{color}" and a style number may itself hold a hyphen.
         items.append({"orderable": nested.get("Orderable", {}), "visible": nested.get("Visible", {}),
-                      "variant_group": p.external_id.split("-")[0] if p.external_id else None, "_entity_id": p.entity_id})
+                      "variant_group": p.style_number or (p.external_id.split("-")[0] if p.external_id else None), "_entity_id": p.entity_id})
     adapter.group_variants(items, w.get("variant_attribute_names") or [])
     check = adapter.validate(items)
     if not check.ok:
@@ -307,9 +325,15 @@ def template_bytes_for(channel: Channel) -> bytes | None:
 
 
 def deliver_publish(session: Session, channel: Channel, rec: PublishRecord) -> dict:
-    """EXP-09: send the publish's payload files through the channel transport (SFTP or email) and record the result."""
+    """EXP-09: send the publish's payload files through the channel transport (SFTP or email) and record the result.
+    Refuses (recorded as skipped) while PIM_FEATURE_CHANNEL_SEND is off."""
     from pim.services.delivery import deliver
 
+    if not send_enabled():
+        result = {"transport": (channel.config or {}).get("transport") or "download", "status": "skipped", "detail": SEND_DISABLED,
+                  "at": utcnow().isoformat(), "files": []}
+        rec.summary = {**(rec.summary or {}), "delivery": result}
+        return result
     st = storage()
     files = [(f["name"], st.read(f["path"])) for f in (rec.files or []) if f.get("kind") == "payload" and f.get("path")]
     result = deliver(channel, files)
@@ -465,6 +489,16 @@ def poll_feedback(session: Session, meta: Metadata, channel: Channel, rec: Publi
     return apply_feedback(session, meta, channel, rec, rows, source="adapter")
 
 
+def feedback_pending(rec: PublishRecord) -> bool:
+    """True while the retailer can still report on this publish: submitted, or a Walmart feed whose items are
+    still processing (the record itself may already read partial or rejected after the first poll)."""
+    if not rec.external_batch_id:
+        return False
+    if rec.status == "submitted":
+        return True
+    return ((rec.summary or {}).get("walmart") or {}).get("status") == "in_progress"
+
+
 def walmart_poll_due(rec: PublishRecord, now: datetime | None = None) -> bool:
     w = (rec.summary or {}).get("walmart") or {}
     nxt = w.get("next_poll_at")
@@ -485,6 +519,8 @@ def _poll_walmart(session: Session, meta: Metadata, channel: Channel, adapter, r
     rows: list[dict] = []
     all_complete = True
     feed_status: dict[str, str] = {}
+    feed_errors: dict[str, str] = {}
+    publish_items = session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars().all()
     for fid in w.get("feed_ids") or [rec.external_batch_id]:
         st = adapter.fetch_status(fid)
         feed_status[fid] = st.get("status", "")
@@ -492,13 +528,22 @@ def _poll_walmart(session: Session, meta: Metadata, channel: Channel, adapter, r
         for it in st.get("items", []):
             rows.append({"external_id": it.get("external_id"), "status": it.get("status"), "message": it.get("message") or "",
                          "field": it.get("field")})
+        if st.get("error") and not st.get("items"):
+            # Walmart rejected the whole feed (feedStatus ERROR, no item details): every item still waiting on it is
+            # rejected with the feed-level reason, so the publish settles instead of polling forever.
+            feed_errors[fid] = str(st["error"])
+            for i in publish_items:
+                if i.external_id and i.status in ("submitted", "in_review", "pending", "valid"):
+                    rows.append({"external_id": i.external_id, "status": "rejected", "message": f"feed {fid} rejected: {st['error']}", "field": None})
     result = apply_feedback(session, meta, channel, rec, rows, source="walmart")
     w["polls"] = int(w.get("polls", 0)) + 1
     w["feed_status"] = feed_status
+    if feed_errors:
+        w["feed_errors"] = feed_errors
     w["last_poll_at"] = now.isoformat()
     w["status"] = "complete" if all_complete else "in_progress"
     w["next_poll_at"] = None if all_complete else next_poll_at(w["polls"], now).isoformat()
-    skus = [i.external_id for i in session.execute(select(PublishItem).where(PublishItem.publish_id == rec.id)).scalars() if i.external_id]
+    skus = [i.external_id for i in publish_items if i.external_id]
     scores = adapter.listing_quality(skus) if skus else {}
     rec.summary = {**(rec.summary or {}), "walmart": w, "listing_quality": {**((rec.summary or {}).get("listing_quality") or {}), **scores}}
     return result
@@ -535,10 +580,12 @@ def channel_health(session: Session, channel: Channel, days: int = 30) -> dict:
             errs[e["message"]] += 1
             kinds[e["message"]] = e.get("kind", "external")
     last = max((r.created_at for r in recs), default=None)
-    lq = [v for r in recs for v in ((r.summary or {}).get("listing_quality") or {}).values() if isinstance(v, (int, float))]
-    feeds_in_progress = sum(1 for r in recs if ((r.summary or {}).get("walmart") or {}).get("status") == "in_progress")
-    return {"channel_code": channel.code, "publishes": len(recs), "products_sent": sum(r.product_count for r in recs),
-            "listing_quality_avg": round(sum(lq) / len(lq), 1) if lq else None, "feeds_in_progress": feeds_in_progress,
+    out: dict[str, Any] = {}
+    if channel.adapter == "walmart_mp":  # EXP-08 only: other channels carry neither key, so the UI shows no Walmart cards
+        lq = [v for r in recs for v in ((r.summary or {}).get("listing_quality") or {}).values() if isinstance(v, (int, float))]
+        out["listing_quality_avg"] = round(sum(lq) / len(lq), 1) if lq else None
+        out["feeds_in_progress"] = sum(1 for r in recs if ((r.summary or {}).get("walmart") or {}).get("status") == "in_progress")
+    return {"channel_code": channel.code, "publishes": len(recs), "products_sent": sum(r.product_count for r in recs), **out,
             "accepted": accepted, "rejected": rejected, "in_review": st.get("in_review", 0), "health_score": score,
             "last_publish_at": last.isoformat() if last else None,
             "last_success_at": (lambda d: d.isoformat() if d else None)(last_success_at(session, channel.code)),

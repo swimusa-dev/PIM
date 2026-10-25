@@ -303,7 +303,11 @@ stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` until the owner approves th
 
 1. **Secrets**: add `walmart-client-id`, `walmart-client-secret` and `shopify-sandbox-token` to the secret scope;
    the bundle binds them as app resources. SFTP passwords or private keys for retailer deliveries are app secret
-   resources too, named on the channel transport (`secret_name`).
+   resources too, named on the channel transport (`secret_name`). Every SFTP transport also pins the retailer
+   server's host key (`host_key`: the `ssh-keyscan <host>` line or the `SHA256:` fingerprint from the retailer's
+   onboarding sheet); a server presenting a different key is refused before any credential is sent. SFTP and email
+   deliveries, like API sends, stay off until `PIM_FEATURE_CHANNEL_SEND=true`: publishes record the delivery as
+   skipped and **Deliver now** answers 409 until then.
 2. **Rithum (Nordstrom drop-ship and Target+, D-01 and D-02)**: under **Admin > Channels > Transport** upload the
    program's catalog template from the Rithum account (XLSX or CSV); the header columns become feed columns. Map
    each column to an attribute, a core field, `image:1..n`, `gtin`, `nrf_color` or `nrf_size` (GS1 NRF codes ride on

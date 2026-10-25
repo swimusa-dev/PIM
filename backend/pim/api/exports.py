@@ -204,6 +204,8 @@ def put_transport(code: str, body: TransportBody, session: Session = Depends(get
                      "case_transform": c.get("case_transform", "as_is"), "value_map": {str(k): str(v) for k, v in (c.get("value_map") or {}).items()}})
     if body.transport == "sftp" and not ((body.sftp or {}).get("host") and (body.sftp or {}).get("username")):
         raise HTTPException(400, "SFTP needs a host and a username")
+    if body.transport == "sftp" and not str((body.sftp or {}).get("host_key") or "").strip():
+        raise HTTPException(400, "SFTP needs the server's host key (ssh-keyscan output or a SHA256 fingerprint) so uploads go only to that server")
     if body.transport == "email" and not [t for t in ((body.email or {}).get("to") or []) if t]:
         raise HTTPException(400, "Email delivery needs at least one recipient")
     if body.walmart:
@@ -292,6 +294,8 @@ def deliver_now(publish_id: str, session: Session = Depends(get_session), user: 
         raise HTTPException(409, f"The channel transport is {transport}; only SFTP and email deliveries can be sent")
     if rec.kind == "dry_run":
         raise HTTPException(409, "Dry runs are never delivered")
+    if not publishing.send_enabled():
+        raise HTTPException(409, "Deliveries are off until PIM_FEATURE_CHANNEL_SEND is true")
     result = publishing.deliver_publish(session, ch, rec)
     session.commit()
     if result.get("status") == "failed":

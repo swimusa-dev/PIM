@@ -242,14 +242,15 @@ class ShopifyAdminClient:
                     errs = data["metafieldsSet"]["userErrors"]
                 else:
                     by_sku = {e["node"]["sku"]: e["node"]["id"] for e in prod.get("variants", {}).get("edges", [])}
-                    variants = []
+                    merged: dict[str, dict] = {}  # one ProductVariantsBulkInput per variant id, every changed field merged
                     for v in m["variants"]:
                         vid = by_sku.get(v["sku"])
                         if not vid:
                             continue
                         field = {"Variant Barcode": "barcode", "Variant Price": "price", "Variant Compare At Price": "compareAtPrice"}.get(v["field"])
                         if field:
-                            variants.append({"id": vid, field: v["value"]})
+                            merged.setdefault(vid, {"id": vid})[field] = v["value"]
+                    variants = list(merged.values())
                     data = self.graphql("mutation($p: ID!, $v: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $p, variants: $v) { userErrors { field message } } }",
                                         {"p": pid, "v": variants})
                     errs = data["productVariantsBulkUpdate"]["userErrors"]

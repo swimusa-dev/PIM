@@ -59,6 +59,7 @@ class ProductPayload:
     sources: dict[str, str] = field(default_factory=dict)  # target field -> attribute code (for feedback mapping)
     variants: list[dict] = field(default_factory=list)  # EXP-09 one row per SKU: {sku, upc, size, nrf_size}
     feed: dict[str, Any] = field(default_factory=dict)  # EXP-09 feed column header -> value (style-color level)
+    style_number: str | None = None  # EXP-08 variant group key (external ids are "{style}-{color}", never split them)
 
     @property
     def valid(self) -> bool:
@@ -420,26 +421,32 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
     feed_cols: list[dict] = default_feed_columns(channel)
     variants_by_parent: dict[str, list[dict]] = {}
     if feed_cols and entities:
-        size_attr = next((a for a in meta.attributes.values() if a.code == "size_scale"), None)
+        from pim.adapters.rithum import nrf_code
+
+        skus_by_parent: dict[str, list[ProductEntity]] = {}
         for sku in session.execute(select(ProductEntity).where(ProductEntity.parent_id.in_([e.id for e in entities]),
                                                                ProductEntity.level == "sku").order_by(ProductEntity.sku)).scalars():
-            nrf_size = None
-            if sku.size:
-                for lst in meta.option_lists.values():
-                    if lst.kind == "size_scale":
-                        opt = next((o for o in lst.values if o.code.upper() == str(sku.size).upper()), None)
-                        if opt is not None:
-                            from pim.adapters.rithum import nrf_code
-
-                            nrf_size = nrf_code(opt, "size")
-                            break
-            variants_by_parent.setdefault(sku.parent_id, []).append({"sku": sku.sku, "upc": sku.upc, "size": sku.size, "nrf_size": nrf_size,
-                                                                       "entity_id": sku.id})
-        _ = size_attr
+            skus_by_parent.setdefault(sku.parent_id, []).append(sku)
+        for parent_id, skus in skus_by_parent.items():
+            # The NRF size code comes from the scale the style-color's SKUs belong to (DM-14): the scale that holds the
+            # most of its sizes, so a code shared by two scales (a "D" cup against a numeric "D") resolves within the
+            # product's own scale instead of whichever scale happens to be listed first.
+            scale = size_scale_for([s.size for s in skus], meta)
+            for sku in skus:
+                opt = None
+                if sku.size:
+                    if scale is not None:
+                        opt = next((o for o in scale.values if o.code.upper() == str(sku.size).upper()), None)
+                    if opt is None:
+                        entry = meta.size_scale_entry(sku.size)
+                        opt = entry[1] if entry else None
+                variants_by_parent.setdefault(parent_id, []).append({"sku": sku.sku, "upc": sku.upc, "size": sku.size,
+                                                                     "nrf_size": nrf_code(opt, "size") if opt is not None else None,
+                                                                     "entity_id": sku.id})
     for ent in entities:
         style = styles.get(ent.parent_id or "")
         merged = merged_values(values, ent, style)
-        p = ProductPayload(entity_id=ent.id, label=ent.label, external_id=_external_id(ent, style, channel))
+        p = ProductPayload(entity_id=ent.id, label=ent.label, external_id=_external_id(ent, style, channel), style_number=ent.style_number)
         flat: dict[str, Any] = {name: _core(ent, style, name) for name in CORE_FIELDS}
         for (code, ch), pv in merged.items():
             if ch in ("", channel.code) and pv.approval_state == "approved":
@@ -471,6 +478,9 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
                              "height": (rend or {}).get("height") or (lk.asset.height if lk.asset else None)})
         if wanted_shots and not p.images:
             p.issues.append(PayloadIssue(ent.id, ent.label, "No confirmed image for the channel's shot types", "image", severity="warning"))
+        prefix = vpn_prefix_for(channel)
+        if prefix and flat.get("style_number"):
+            flat["vendor_part_number"] = f"{prefix}{flat['style_number']}"
         _apply_image_naming(p, ent, flat, profile if profile.get("naming") else {**profile, "naming": (channel.config or {}).get("image_profile_naming")})
         if feed_cols:
             p.variants = variants_by_parent.get(ent.id, [])
@@ -480,6 +490,30 @@ def build_payloads(session: Session, meta: Metadata, channel: Channel, entities:
     if feed_cols:
         validate_feed(channel, out)
     return out
+
+
+def size_scale_for(sizes: list[str | None], meta: Metadata):  # noqa: ANN201
+    """The size_scale option list that covers the most of a product's sizes (every scale on a tie keeps seed order);
+    None when no scale holds any of them."""
+    wanted = {str(s).upper() for s in sizes if s}
+    if not wanted:
+        return None
+    best, best_hits = None, 0
+    for lst in meta.option_lists.values():
+        if lst.kind != "size_scale":
+            continue
+        hits = sum(1 for o in lst.values if o.code.upper() in wanted)
+        if hits > best_hits:
+            best, best_hits = lst, hits
+    return best
+
+
+def vpn_prefix_for(channel: Channel) -> str:
+    """EXP-10: the Rithum profile's VPN prefix is prepended to the style number wherever the feed or the image names
+    carry it (the Transport tab promises exactly that)."""
+    if channel.adapter != "rithum":
+        return ""
+    return str(((channel.config or {}).get("rithum") or {}).get("vpn_prefix") or "")
 
 
 def _apply_image_naming(p: ProductPayload, ent: ProductEntity, flat: dict[str, Any], profile: dict) -> None:
@@ -495,6 +529,8 @@ def _apply_image_naming(p: ProductPayload, ent: ProductEntity, flat: dict[str, A
 def _naming_value(key: str, seq: int, flat: dict[str, Any], ent: ProductEntity) -> str:
     if key == "seq":
         return f"{seq:02d}"
+    if key == "style_number" and flat.get("vendor_part_number"):
+        key = "vendor_part_number"  # Rithum VPN prefix applies to image names too (VPN-SupplierColorName-01)
     v = flat.get(key, getattr(ent, key, None))
     if key in ("customer_color_name", "supplier_color_name") and v:
         v = re.sub(r"[^A-Za-z0-9]+", "", str(v).title())
@@ -535,10 +571,13 @@ def _render_feed(meta: Metadata, channel: Channel, p: ProductPayload, ent: Produ
         elif src == "image_ai_flag":
             val = "Yes" if any(i.get("ai_generated") for i in p.images) else "No"
         elif src == "nrf_color":
-            pv = merged.get((color_attr, channel.code)) or merged.get((color_attr, "")) if color_attr else None
-            val = _nrf(meta, color_attr, typed_code(pv), "color") if pv is not None else None
+            # P4: only an approved, confirmed color family drives the NRF code (same gate as every other column)
+            ready, pv = ready_value(meta, merged, color_attr, channel.code, refs) if color_attr else (None, None)
+            val = _nrf(meta, color_attr, typed_code(pv), "color") if pv is not None and ready not in (None, CLEAR) else None
         elif src in ("core.sku", "core.upc", "core.size", "gtin", "nrf_size"):
             val = None  # per variant
+        elif src == "core.style_number" and flat.get("vendor_part_number"):
+            val = flat["vendor_part_number"]
         else:
             v, _attr = resolve_source(meta, channel, ent, style, merged, src, refs)
             val = v
@@ -626,7 +665,6 @@ def payload_files(channel: Channel, payloads: list[ProductPayload], schema: Targ
         # EXP-09 / EXP-10 / EXP-11: template-based retailer feed, one row per SKU, through the feed renderer
         rows, cols = feed_rows(channel, valid)
         adapter = feed_adapter_for(channel, template_bytes)
-        keyed = [{c.source: r.get(c.header) for c in adapter.columns} | {"_label": r.get("_label")} for r in rows]
         # the renderer reads values by source; the rows above are already header-keyed, so map them back
         keyed = [{**{c.source: r.get(c.header) for c in adapter.columns}, "core.style_number": r.get(next((c["header"] for c in cols if c.get("source") == "core.style_number"), ""), None)} for r in rows]
         content = adapter.to_xlsx(keyed) if fmt == "xlsx" else adapter.to_csv(keyed)

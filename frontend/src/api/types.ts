@@ -1606,6 +1606,7 @@ export interface SftpSettings {
   path: string;
   username: string;
   secret_name: string; // app secret resource holding the password or key
+  host_key: string; // pinned server key: ssh-keyscan line, bare base64 key, or "SHA256:<fingerprint>"
 }
 
 export interface EmailSettings {

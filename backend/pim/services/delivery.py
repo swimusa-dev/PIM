@@ -4,6 +4,8 @@ publish as a DeliveryResult; a misconfigured transport fails the delivery, never
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import logging
 import os
@@ -67,17 +69,52 @@ def _sftp(conf: dict, files: list[tuple[str, bytes]], client=None) -> str:  # no
         secret = secret_value(conf.get("secret_name"))
         if not secret:
             raise NotConfigured(f"SFTP secret {conf.get('secret_name') or '(unset)'} is not bound as an app secret resource")
+        pinned = str(conf.get("host_key") or "").strip()
+        if not pinned:
+            raise NotConfigured("SFTP host key is not pinned on the channel transport; paste the server's ssh-keyscan key or SHA256 fingerprint")
         transport = paramiko.Transport((host, int(conf.get("port") or 22)))
-        if secret.startswith("-----BEGIN"):
-            key = paramiko.RSAKey.from_private_key(io.StringIO(secret))
-            transport.connect(username=user, pkey=key)
-        else:
-            transport.connect(username=user, password=secret)
-        client = paramiko.SFTPClient.from_transport(transport)
+        try:
+            # The server proves its identity before any credential leaves the app: the key it presents must match
+            # the pinned host key, otherwise an impostor at the host name would receive the password or key exchange.
+            transport.start_client(timeout=30)
+            remote = transport.get_remote_server_key()
+            if not host_key_matches(pinned, remote):
+                raise NotConfigured(f"SFTP host key for {host} does not match the pinned key (got SHA256:{_sha256_fingerprint(remote)})")
+            if secret.startswith("-----BEGIN"):
+                key = paramiko.RSAKey.from_private_key(io.StringIO(secret))
+                transport.auth_publickey(user, key)
+            else:
+                transport.auth_password(user, secret)
+            client = paramiko.SFTPClient.from_transport(transport)
+            try:
+                _upload(client, path, files)
+            finally:
+                client.close()
+        finally:
+            transport.close()
+        return f"{len(files)} file(s) uploaded to {host}:{path}"
+    _upload(client, path, files)
+    return f"{len(files)} file(s) uploaded to {host}:{path}"
+
+
+def _upload(client, path: str, files: list[tuple[str, bytes]]) -> None:  # noqa: ANN001
     for name, data in files:
         with client.open(f"{path}/{name}", "wb") as fh:
             fh.write(data)
-    return f"{len(files)} file(s) uploaded to {host}:{path}"
+
+
+def _sha256_fingerprint(key) -> str:  # noqa: ANN001
+    return base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
+
+
+def host_key_matches(pinned: str, key) -> bool:  # noqa: ANN001
+    """`pinned` is either an ssh-keyscan line (`host ssh-ed25519 AAAA...`), the bare base64 key, or `SHA256:<fp>`."""
+    pinned = pinned.strip()
+    if pinned.upper().startswith("SHA256:"):
+        return pinned.split(":", 1)[1].rstrip("=") == _sha256_fingerprint(key)
+    tokens = [t for t in pinned.split() if t]
+    candidates = {t for t in tokens if t.startswith("AAAA")} or set(tokens)
+    return key.get_base64() in candidates
 
 
 def _email(conf: dict, label: str, files: list[tuple[str, bytes]], smtp_factory=None) -> str:  # noqa: ANN001

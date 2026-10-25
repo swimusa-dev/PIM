@@ -34,6 +34,20 @@ from pim.config import get_settings
 log = logging.getLogger(__name__)
 
 POLL_CADENCE_MINUTES = [15, 60, 120, 240]  # then every 4 hours [C14]
+STATUS_PAGE_SIZE = 1000  # /v3/feeds/{id}?includeDetails=true pages item statuses at 1,000
+LISTING_QUALITY_BATCH = 200
+FEED_TERMINAL_STATUSES = ("PROCESSED", "ERROR")
+FEED_FAILED_STATUSES = ("ERROR",)
+
+
+def _feed_error(data: dict) -> str:
+    errs = data.get("ingestionErrors")
+    if isinstance(errs, dict):
+        errs = errs.get("ingestionError") or []
+    parts = [f"{e.get('code', '')}: {e.get('description', '')}".strip(": ") for e in (errs or []) if isinstance(e, dict)]
+    return "; ".join(x for x in parts if x) or "feed rejected by Walmart"
+
+
 ITEM_STATUS_MAP = {"SUCCESS": "accepted", "PUBLISHED": "accepted", "DATA_ERROR": "rejected", "SYSTEM_ERROR": "rejected",
                    "TIMEOUT_ERROR": "rejected", "INPROGRESS": "in_review", "RECEIVED": "in_review", "PROCESSING": "in_review",
                    "ERROR": "rejected"}
@@ -183,9 +197,24 @@ class WalmartMarketplaceAdapter:
 
     def fetch_status(self, batch_id: str) -> dict:
         """Feed status with item details; a PROCESSED feed can still carry INPROGRESS items [C14]."""
-        data = self._request("GET", f"/v3/feeds/{batch_id}", params={"includeDetails": "true", "limit": "1000", "offset": "0"}).json()
+        # Item statuses page 1,000 at a time; a feed can hold up to max_items_per_feed items, so every page is read
+        # before `complete` is decided (a partial read would mark a feed done while later items still process).
+        data: dict = {}
+        raw_items: list[dict] = []
+        offset = 0
+        while True:
+            page = self._request("GET", f"/v3/feeds/{batch_id}",
+                                 params={"includeDetails": "true", "limit": str(STATUS_PAGE_SIZE), "offset": str(offset)}).json()
+            if not data:
+                data = page
+            chunk = (page.get("itemDetails") or {}).get("itemIngestionStatus", []) or []
+            raw_items.extend(chunk)
+            offset += len(chunk)
+            received = page.get("itemsReceived")
+            if len(chunk) < STATUS_PAGE_SIZE or (isinstance(received, int) and offset >= received):
+                break
         items = []
-        for it in data.get("itemDetails", {}).get("itemIngestionStatus", []) or []:
+        for it in raw_items:
             raw = str(it.get("ingestionStatus", "")).upper()
             errors = it.get("ingestionErrors", {}).get("ingestionError", []) if isinstance(it.get("ingestionErrors"), dict) else (it.get("ingestionErrors") or [])
             msg = "; ".join(f"{e.get('code', '')}: {e.get('description', '')}".strip(": ") for e in errors if isinstance(e, dict))
@@ -196,7 +225,10 @@ class WalmartMarketplaceAdapter:
         in_progress = sum(1 for i in items if i["status"] == "in_review")
         return {"batch_id": batch_id, "status": feed_status, "items": items, "items_received": data.get("itemsReceived"),
                 "items_succeeded": data.get("itemsSucceeded"), "items_failed": data.get("itemsFailed"),
-                "items_processing": data.get("itemsProcessing", in_progress), "complete": feed_status == "PROCESSED" and in_progress == 0}
+                "items_processing": data.get("itemsProcessing", in_progress),
+                "error": _feed_error(data) if feed_status in FEED_FAILED_STATUSES else None,
+                # PROCESSED and ERROR are both terminal: an ERROR feed is never polled again, its items are rejected
+                "complete": feed_status in FEED_TERMINAL_STATUSES and in_progress == 0}
 
     def fetch_errors(self, batch_id: str) -> list[dict]:
         return [i for i in self.fetch_status(batch_id)["items"] if i["status"] == "rejected"]
@@ -205,23 +237,23 @@ class WalmartMarketplaceAdapter:
         """Listing Quality score per item [C15]. Endpoint shape UNCONFIRMED against a live account; failures are
         logged and leave the health view without scores rather than failing the poll."""
         out: dict[str, float] = {}
-        if not skus:
-            return out
-        try:
-            data = self._request("POST", "/v3/insights/items/listingQuality/items", json={"skus": skus[:200]}).json()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("listing quality unavailable: %s", exc)
-            return out
-        payload = data.get("payload", data)
-        for it in payload if isinstance(payload, list) else payload.get("items", []) or []:
-            sku = it.get("sku")
-            score = (it.get("itemQualityScore") or it.get("qualityScore") or {})
-            val = score.get("score") if isinstance(score, dict) else score
-            if sku and val is not None:
-                try:
-                    out[str(sku)] = float(val)
-                except (TypeError, ValueError):
-                    continue
+        for start in range(0, len(skus), LISTING_QUALITY_BATCH):  # every SKU is scored, 200 per request
+            chunk = skus[start:start + LISTING_QUALITY_BATCH]
+            try:
+                data = self._request("POST", "/v3/insights/items/listingQuality/items", json={"skus": chunk}).json()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("listing quality unavailable: %s", exc)
+                return out
+            payload = data.get("payload", data)
+            for it in payload if isinstance(payload, list) else payload.get("items", []) or []:
+                sku = it.get("sku")
+                score = (it.get("itemQualityScore") or it.get("qualityScore") or {})
+                val = score.get("score") if isinstance(score, dict) else score
+                if sku and val is not None:
+                    try:
+                        out[str(sku)] = float(val)
+                    except (TypeError, ValueError):
+                        continue
         return out
 
 

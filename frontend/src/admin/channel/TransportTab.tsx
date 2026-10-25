@@ -65,7 +65,7 @@ export const EMPTY_TRANSPORT: ChannelTransport = {
   walmart: null,
   rithum: null,
 };
-const EMPTY_SFTP: SftpSettings = { host: "", port: 22, path: "/", username: "", secret_name: "" };
+const EMPTY_SFTP: SftpSettings = { host: "", port: 22, path: "/", username: "", secret_name: "", host_key: "" };
 const EMPTY_EMAIL: EmailSettings = { to: [], subject: "" };
 const EMPTY_RITHUM: RithumSettings = { program: "nordstrom_dropship", supplier_id: null, vpn_prefix: null, family_rules: false };
 
@@ -129,11 +129,26 @@ export function TransportTab({ channel, canEdit }: { channel: Channel; canEdit: 
 
   const upload = useMutation({
     mutationFn: (file: File) => channelApi.uploadFeedTemplate(channel.code, file),
-    onSuccess: (r) => {
+    onSuccess: async (r) => {
       setTemplateColumns(r.columns);
       setTemplateFile(null);
       if (fileRef.current) fileRef.current.value = "";
-      update({ feed_template_path: r.feed_template_path, feed_template_name: r.feed_template_name });
+      // The server stored the template, may have switched the file format to xlsx and appended one unmapped feed
+      // column per new header. Fold that into the draft (keeping any unsaved edits) instead of marking the stale
+      // columns dirty: a later Save would otherwise PUT the pre-upload columns and format over what was just added.
+      const fresh = fromServer(await channelApi.transport(channel.code), channel);
+      setDraft((d) => {
+        const base = d ?? fresh;
+        const have = new Set(base.feed_columns.map((c) => c.header));
+        return {
+          ...base,
+          feed_template_path: fresh.feed_template_path,
+          feed_template_name: fresh.feed_template_name,
+          file_format: fresh.file_format,
+          feed_columns: [...base.feed_columns, ...fresh.feed_columns.filter((c) => !have.has(c.header))],
+        };
+      });
+      qc.setQueryData(["channel", channel.code, "transport"], fresh);
       toast(
         `Template stored: ${r.columns.length} header column${r.columns.length === 1 ? "" : "s"} read${r.schema_loaded ? "; the target schema was loaded from it" : ""}.`,
         "ok",
@@ -329,6 +344,7 @@ function validate(t: ChannelTransport): string[] {
   if (t.transport === "sftp") {
     const s = t.sftp;
     if (!s || !s.host.trim() || !s.username.trim() || !s.secret_name.trim()) out.push("SFTP needs a host, a username and a secret name.");
+    if (s && !(s.host_key ?? "").trim()) out.push("SFTP needs the server's host key so uploads go only to that server.");
     if (s && (!(s.port > 0) || s.port > 65535)) out.push("The SFTP port must be between 1 and 65535.");
   }
   if (t.transport === "email") {
@@ -580,6 +596,16 @@ function SftpSection({ sftp, setSftp, canEdit }: { sftp: SftpSettings; setSftp: 
               Secret name
               <input className="mono" value={sftp.secret_name} placeholder="retailer-sftp" onChange={(e) => setSftp({ ...sftp, secret_name: e.target.value })} />
               <span className="help">The password or private key is never stored in the PIM. It lives in an app secret resource with this name, bound to the Databricks App.</span>
+            </label>
+            <label className="field" style={{ gridColumn: "1 / -1" }}>
+              Server host key
+              <input
+                className={`mono${(sftp.host_key ?? "").trim() ? "" : " invalid"}`}
+                value={sftp.host_key ?? ""}
+                placeholder="ssh-keyscan output (ssh-ed25519 AAAA...) or SHA256:fingerprint"
+                onChange={(e) => setSftp({ ...sftp, host_key: e.target.value })}
+              />
+              <span className="help">The key the retailer's server presents must match this before the password or key is sent. Run ssh-keyscan against the host, or paste the SHA256 fingerprint from the retailer's onboarding sheet.</span>
             </label>
           </div>
         </fieldset>
