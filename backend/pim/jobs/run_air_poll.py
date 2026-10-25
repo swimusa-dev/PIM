@@ -33,6 +33,7 @@ def main() -> None:
 
             record_adapter_error(session, "air_dam", exc, {"op": "poll", "boards": ",".join(b or "" for b in boards)})
             mark_job_run(session, "failed", totals, error=str(exc)[:2000])
+            session.commit()  # session_scope rolls back on the re-raise; the event and the failed status must survive it
             raise
         mark_job_run(session, "succeeded", totals)
 

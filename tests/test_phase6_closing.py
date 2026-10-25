@@ -136,6 +136,14 @@ def test_dm13_feed_source_and_broken_links_in_readiness(session, meta, admin, in
     assert any("related product(s) discontinued or missing" in w for w in snap.detail["warnings"])
     assert build_payloads(session, meta, ch, [fvp])[0].feed["Goes With"] == ""  # a broken link never ships
     assert rel.broken_links(session, [fvp.id, ecb.id]) == {fvp.id: [f"goes_great_with: {ecb.label}"]}
+    # the batched feed lookup matches the per-entity one and folds in inherited style links
+    rel.add(session, admin, _style(session), "replaced_by", ["200810"])
+    ch.config = {**ch.config, "feed_columns": [{"header": "Goes With", "source": "related:goes_great_with"}, {"header": "Replaced", "source": "related:replaced_by"}]}
+    session.flush()
+    batched = rel.related_external_ids_for(session, [fvp, ecb], ["goes_great_with", "replaced_by"])
+    assert batched[fvp.id] == {"goes_great_with": [], "replaced_by": ["200810"]} and batched[ecb.id]["replaced_by"] == ["200810"]
+    assert batched[fvp.id]["replaced_by"] == rel.related_external_ids(session, fvp, "replaced_by")
+    assert build_payloads(session, meta, ch, [fvp])[0].feed["Replaced"] == "200810"
 
 
 def test_dm13_api_types_links_rights_and_feed_source_validation(client, session, meta, admin):
@@ -148,6 +156,17 @@ def test_dm13_api_types_links_rights_and_feed_source_validation(client, session,
     assert r.json()["created"] == 1 and r.json()["skipped"] == [{"token": "nope", "reason": "not found"}]
     rows = client.get(f"/api/products/{ecb.id}/relationships", headers=VIEWER).json()["rows"]
     assert rows[0]["target"]["entity_id"] == fvp.id and rows[0]["direction"] == "two_way"
+    # both ends of a two-way link get their readiness refreshed: discontinuing FVP must show on ECB after a relink
+    fvp.lifecycle_status = "discontinued"
+    session.commit()
+    client.delete(f"/api/relationships/{rows[0]['id']}", headers=ADMIN)
+    client.post(f"/api/products/{fvp.id}/relationships", json=body, headers=ADMIN)
+    session.expire_all()
+    snap = session.get(ReadinessSnapshot, {"entity_id": ecb.id, "channel_code": "nordstrom"})
+    assert any("related product(s) discontinued" in w for w in snap.detail["warnings"])
+    fvp.lifecycle_status = "active"
+    session.commit()
+    rows = client.get(f"/api/products/{ecb.id}/relationships", headers=VIEWER).json()["rows"]
     assert client.post(f"/api/products/{fvp.id}/relationships", json={"type_code": "replaced_by", "targets": ["200810"]}, headers=ADMIN).status_code == 400
     assert client.put("/api/relationship-types/goes_great_with", json={"label": "Pairs"}, headers=VIEWER).status_code == 403
     assert client.put("/api/relationship-types/goes_great_with", json={"label": "Pairs", "direction": "sideways"}, headers=ADMIN).status_code == 400
@@ -191,10 +210,20 @@ def test_gov02_restore_product_to_point_in_time_and_roll_the_restore_back(sessio
     assert back["restored"] == 2
     rows = {pv.attribute_code: pv.value_text for pv in session.execute(select(ProductValue).where(ProductValue.entity_id == fvp.id)).scalars()}
     assert rows["product_title"] == "Skylar Longline Top" and rows["customer_color_name"] == "Festival Pink"
-    # a user without Approve rights gets every attribute reported, nothing written
+    # a user without Approve rights gets every attribute reported, nothing written, and no change set is created
     merch = make_user(session, "merch@swimusa.com", ["viewer"])
+    before = history.list_change_sets(session, entity_id=fvp.id)["total"]
     res2 = history.restore_to(session, meta, merch, fvp, t1)
-    assert res2["restored"] == 0 and all(r["outcome"] == "rejected" for r in res2["results"])
+    assert res2["restored"] == 0 and all(r["outcome"] == "rejected" for r in res2["results"]) and res2["change_set_id"] is None
+    assert history.list_change_sets(session, entity_id=fvp.id)["total"] == before
+    # restoring to before the ERP load never rewrites ERP-owned attributes (P1), only the PIM-owned ones
+    res3 = history.restore_to(session, meta, admin, fvp, utcnow() - timedelta(days=1))
+    erp_rows = [r for r in res3["results"] if meta.attributes[r["attribute_code"]].is_erp]
+    assert erp_rows and all(r["outcome"] == "skipped" and "ERP" in r["message"] for r in erp_rows)
+    from pim.models import ProductValue as PV
+
+    assert session.execute(select(PV).where(PV.entity_id == fvp.id, PV.attribute_code == erp_rows[0]["attribute_code"])).scalars().first() is not None
+    assert all(r["outcome"] != "skipped" for r in res3["results"] if r["attribute_code"] in ("product_title", "customer_color_name"))
 
 
 def test_gov02_api_restore_to_and_change_set_rollback(client, session, meta, admin):
@@ -216,6 +245,19 @@ def test_gov02_api_restore_to_and_change_set_rollback(client, session, meta, adm
     assert client.post(f"/api/change-sets/{cs_id}/rollback", headers=ADMIN).json()["restored"] == 1
     assert client.post(f"/api/change-sets/{cs_id}/rollback", headers=ADMIN).status_code == 409  # already rolled back
     assert client.get(f"/api/change-sets/{cs_id}", headers=ADMIN).json()["rolled_back_at"]
+    # import, bulk and ingest sets never roll back from here (their own pages do, or never for the ERP load)
+    from pim.models import ChangeSet
+
+    ingest_cs = session.execute(select(ChangeSet).where(ChangeSet.kind == "ingest")).scalars().first()
+    assert ingest_cs is not None
+    r = client.post(f"/api/change-sets/{ingest_cs.id}/rollback", headers=ADMIN)
+    assert r.status_code == 409 and "cannot be rolled back" in r.json()["detail"]
+    assert client.get(f"/api/change-sets/{ingest_cs.id}", headers=ADMIN).json()["rollbackable"] is False
+    imp = ChangeSet(kind="import", created_by="x", description="batch")
+    session.add(imp)
+    session.commit()
+    r = client.post(f"/api/change-sets/{imp.id}/rollback", headers=ADMIN)
+    assert r.status_code == 409 and "import batch page" in r.json()["detail"]
     # the History tab's "Restore to this point" passes the row id: the row's own change is undone too
     hist = client.get(f"/api/products/{fvp.id}/history?attribute_code=product_title", headers=ADMIN).json()["rows"]
     two = next(h for h in hist if (h["new_value"] or {}).get("value") == "Two")
@@ -345,17 +387,26 @@ def test_imp02_ai_mapping_suggester_behind_the_flag_never_auto_accepts(session, 
 # GOV-04 adapter error rates, ARC-05 resolved stubs
 # ---------------------------------------------------------------------------------------------------
 def test_gov04_adapter_errors_are_scrubbed_and_rated(client, session, meta, admin):
-    ev = record_adapter_error(session, "walmart_mp", "401 for token=abc123 secret: xyz at /v3/feeds", {"publish_id": "p1"})
-    assert ev.payload["error"] == "401 for token=<redacted> secret=<redacted> xyz at /v3/feeds" and scrub("plain text") == "plain text"
+    ev = record_adapter_error(session, "walmart-mp", "401 for token=abc123 secret: xyz at /v3/feeds", {"publish_id": "p1", "adapter": "walmart_mp"})
+    assert ev.payload["error"] == "401 for token=<redacted> secret=<redacted> at /v3/feeds" and scrub("plain text") == "plain text"
+    # every credential form loses its value (GOV-05): key=value, key: value, Authorization: Bearer x, bare Bearer x
+    assert scrub("HTTP 401 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc") == "HTTP 401 Authorization=<redacted>"
+    assert scrub("x-api-key: k-12345 then client_secret = s3cr3t end") == "x-api-key=<redacted> then client_secret=<redacted> end"
+    assert scrub("header Bearer abcdefghijklmnop sent") == "header Bearer <redacted> sent"
     session.add(PublishRecord(channel_code="walmart-mp", channel_version=1, kind="publish", mode="full", status="failed", created_by="x"))
     session.add(PublishRecord(channel_code="walmart-mp", channel_version=1, kind="publish", mode="full", status="completed", created_by="x"))
+    record_adapter_error(session, "air_dam", "500 from Air", {"op": "poll"})
     session.commit()
     rates = {r["adapter"]: r for r in adapter_error_rates(session)}
+    # one row per channel: the publish record and its adapter_error event count once, never as a second 100 percent row
+    assert set(rates) == {"walmart-mp", "air_dam"}
     assert rates["walmart-mp"]["calls"] == 2 and rates["walmart-mp"]["errors"] == 1 and rates["walmart-mp"]["error_rate"] == 0.5
-    assert rates["walmart_mp"]["errors"] == 1 and rates["walmart_mp"]["last_error"].startswith("401")
+    assert rates["walmart-mp"]["last_error"].startswith("401")
+    assert rates["air_dam"]["calls"] == 0 and rates["air_dam"]["errors"] == 1 and rates["air_dam"]["error_rate"] is None
     t = client.get("/api/admin/telemetry", headers=ADMIN).json()
-    assert any(r["adapter"] == "walmart-mp" for r in t["adapter_error_rates"]) and t["adapter_errors"][0]["adapter"] == "walmart_mp"
-    assert session.execute(select(AppEvent).where(AppEvent.kind == "adapter_error")).scalars().one().payload["publish_id"] == "p1"
+    assert {r["adapter"] for r in t["adapter_error_rates"]} == {"walmart-mp", "air_dam"} and t["adapter_errors"][0]["adapter"] == "air_dam"
+    events = session.execute(select(AppEvent).where(AppEvent.kind == "adapter_error", AppEvent.source == "walmart-mp")).scalars().all()
+    assert len(events) == 1 and events[0].payload["publish_id"] == "p1" and events[0].payload["adapter"] == "walmart_mp"
 
 
 def test_arc05_resolved_stubs_point_at_rithum():

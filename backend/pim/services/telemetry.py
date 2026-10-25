@@ -4,6 +4,7 @@ error rate per adapter over a window for the admin page."""
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from datetime import timedelta
 
@@ -14,19 +15,16 @@ from pim.models import AppEvent, PublishRecord
 from pim.models._common import utcnow
 
 log = logging.getLogger(__name__)
-SECRET_WORDS = ("token", "secret", "password", "authorization", "api_key", "apikey")
+_SECRET_RE = re.compile(r"(?i)\b([a-z_\-]*(?:token|secret|password|passwd|authorization|api[_-]?key|apikey)[a-z_\-]*)\s*[:=]\s*(?:bearer\s+|basic\s+)?\S+")
+_BEARER_RE = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._\-+/=]{8,}")
 
 
 def scrub(text: str) -> str:
-    """Drop anything that looks like a credential assignment from an error string (GOV-05)."""
-    out = []
-    for word in str(text).split():
-        low = word.lower()
-        if any(k in low for k in SECRET_WORDS) and ("=" in word or ":" in word):
-            out.append(word.split("=")[0].split(":")[0] + "=<redacted>")
-        else:
-            out.append(word)
-    return " ".join(out)[:1000]
+    """Drop anything that looks like a credential from an error string (GOV-05): `key=value`, `key: value`,
+    `Authorization: Bearer x` and bare `Bearer x` forms all lose the value."""
+    s = _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", str(text))
+    s = _BEARER_RE.sub(lambda m: f"{m.group(1)} <redacted>", s)
+    return s[:1000]
 
 
 def record_adapter_error(session: Session, adapter: str, error: str | Exception, context: dict | None = None,
@@ -39,7 +37,8 @@ def record_adapter_error(session: Session, adapter: str, error: str | Exception,
 
 
 def adapter_error_rates(session: Session, days: int = 30) -> list[dict]:
-    """Per adapter: publish and poll attempts versus failures (publish records that failed plus adapter_error events)."""
+    """Per channel (the event source is the channel code; the adapter name rides in the payload): publish attempts
+    versus failures over the window. Sources without publish records (the Air poll) list their errors with no rate."""
     since = utcnow() - timedelta(days=days)
     recs = session.execute(select(PublishRecord).where(PublishRecord.created_at >= since,
                                                        PublishRecord.kind.in_(["publish", "scheduled", "package"]))).scalars().all()
@@ -61,9 +60,9 @@ def adapter_error_rates(session: Session, days: int = 30) -> list[dict]:
     adapters = sorted(set(calls) | set(errors_by_adapter))
     out = []
     for a in adapters:
-        n_calls = calls[a] + max(0, errors_by_adapter[a] - failed[a])  # an event without a publish record is still an attempt
-        n_err = max(failed[a], errors_by_adapter[a])
+        n_calls = calls[a]
+        n_err = max(failed[a], errors_by_adapter[a]) if n_calls else errors_by_adapter[a]
         out.append({"adapter": a, "window_days": days, "calls": n_calls, "errors": n_err,
-                    "error_rate": round(n_err / n_calls, 3) if n_calls else None,
+                    "error_rate": round(min(n_err, n_calls) / n_calls, 3) if n_calls else None,
                     "last_error_at": last_error.get(a, {}).get("at"), "last_error": last_error.get(a, {}).get("message")})
     return out

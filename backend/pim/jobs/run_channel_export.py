@@ -51,7 +51,7 @@ def main() -> None:
                 report["feedback"][rec.id] = {"skipped": str(exc)[:200]}
             except Exception as exc:  # noqa: BLE001
                 log.exception("feedback poll for %s failed", rec.id)
-                record_adapter_error(s, ch.adapter or ch.code, exc, {"publish_id": rec.id, "channel": ch.code, "op": "poll"})
+                record_adapter_error(s, ch.code, exc, {"publish_id": rec.id, "adapter": ch.adapter, "op": "poll"})
                 report["feedback"][rec.id] = {"error": str(exc)[:200]}
             s.commit()
         mark_job_run(s, "succeeded", report)

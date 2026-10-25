@@ -181,7 +181,7 @@ def execute_run(session: Session, meta: Metadata, channel: Channel, rec: Publish
     except Exception as exc:  # noqa: BLE001
         log.exception("publish run %s failed", rec.id)
         rec.status, rec.error = "failed", str(exc)[:2000]
-        record_adapter_error(session, channel.adapter or channel.code, exc, {"publish_id": rec.id, "channel": channel.code, "kind": rec.kind})
+        record_adapter_error(session, channel.code, exc, {"publish_id": rec.id, "adapter": channel.adapter, "kind": rec.kind})
     rec.finished_at = utcnow()
     return rec
 
@@ -255,7 +255,7 @@ def _send(session: Session, meta: Metadata, channel: Channel, rec: PublishRecord
             res = adapter.publish([p.data for p in valid], dry_run=False)
     except NotConfigured as exc:
         rec.status, rec.error = "failed", str(exc)
-        record_adapter_error(session, channel.adapter or channel.code, exc, {"publish_id": rec.id, "channel": channel.code})
+        record_adapter_error(session, channel.code, exc, {"publish_id": rec.id, "adapter": channel.adapter})
         return
     rec.external_batch_id = res.batch_id
     rec.status = "submitted"
@@ -342,7 +342,7 @@ def deliver_publish(session: Session, channel: Channel, rec: PublishRecord) -> d
     result = deliver(channel, files)
     rec.summary = {**(rec.summary or {}), "delivery": result}
     if result.get("status") == "failed":
-        record_adapter_error(session, f"{channel.code}:{result.get('transport')}", result.get("detail", ""), {"publish_id": rec.id, "channel": channel.code})
+        record_adapter_error(session, channel.code, result.get("detail", ""), {"publish_id": rec.id, "adapter": channel.adapter, "transport": result.get("transport")})
     return result
 
 

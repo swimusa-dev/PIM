@@ -78,7 +78,7 @@ def main() -> None:
         # GOV-02: the Delta copy now holds every history row, so rows past the hot window leave Lakebase
         from pim.services.history import prune_history
 
-        pruned = prune_history(session) if hist else 0
+        pruned = prune_history(session)  # CDF mode streams history to Delta; otherwise the MERGE above just completed
         mark_job_run(session, "succeeded", {"gold_rows": len(rows), "history_rows": len(hist), "history_pruned": pruned})
 
 

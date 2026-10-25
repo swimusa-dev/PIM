@@ -376,6 +376,10 @@ function ChangeSetsPanel({ entityId, attrLabel, onChanged }: { entityId: string;
                       <span className="muted small" title={formatDate(c.rolled_back_at)}>
                         rolled back {formatDate(c.rolled_back_at, false)}
                       </span>
+                    ) : c.rollbackable === false ? (
+                      <span className="muted small" title={c.kind === "ingest" ? "ERP loads are never undone in the PIM" : "Rolls back from its own page"}>
+                        {c.kind === "import" ? "see import" : c.kind === "bulk" ? "see bulk action" : "not undoable"}
+                      </span>
                     ) : (
                       <button
                         className="small"

@@ -165,6 +165,33 @@ def broken_links(session: Session, entity_ids: list[str]) -> dict[str, list[str]
     return out
 
 
+def related_external_ids_for(session: Session, entities: list[ProductEntity], type_codes: list[str]) -> dict[str, dict[str, list[str]]]:
+    """Batched form for feed runs: {entity_id: {type_code: [style-color ids]}} over own and inherited links, broken
+    links left out, in four queries whatever the catalog size."""
+    if not entities or not type_codes:
+        return {}
+    sources = {e.id for e in entities} | {e.parent_id for e in entities if e.parent_id}
+    rels = session.execute(select(ProductRelationship).where(ProductRelationship.from_entity_id.in_(sources),
+                                                            ProductRelationship.type_code.in_(type_codes))).scalars().all()
+    targets = {t.id: t for t in session.execute(select(ProductEntity).where(ProductEntity.id.in_({r.to_entity_id for r in rels}))).scalars()} if rels else {}
+    by_source: dict[str, dict[str, list[str]]] = {}
+    for r in rels:
+        t = targets.get(r.to_entity_id)
+        if t is None or t.lifecycle_status == "discontinued":
+            continue
+        ext = f"{t.style_number}-{t.color_code}" if t.color_code else str(t.style_number)
+        by_source.setdefault(r.from_entity_id, {}).setdefault(r.type_code, []).append(ext)
+    out: dict[str, dict[str, list[str]]] = {}
+    for e in entities:
+        per_type: dict[str, list[str]] = {}
+        for tc in type_codes:
+            own = by_source.get(e.id, {}).get(tc, [])
+            inherited = by_source.get(e.parent_id, {}).get(tc, []) if e.parent_id else []
+            per_type[tc] = own + [x for x in inherited if x not in own]
+        out[e.id] = per_type
+    return out
+
+
 def related_external_ids(session: Session, entity: ProductEntity, type_code: str) -> list[str]:
     """EXP-09 feed source `related:<type>`: the style-color identifiers of related products (own and inherited)."""
     return [f"{lk['target']['style_number']}-{lk['target']['color_code']}" if lk["target"]["color_code"] else str(lk["target"]["style_number"])

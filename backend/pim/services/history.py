@@ -39,16 +39,23 @@ def restore_to(session: Session, meta: Metadata, user: CurrentUser, entity: Prod
     target = values_as_of(session, entity.id, at, inclusive)
     if attribute_codes:
         target = {k: v for k, v in target.items() if k[0] in attribute_codes}
-    cs = new_change_set(session, "restore", user.email, f"restore {entity.label} to {at.isoformat()}", source_ref=entity.id)
+    cs: ChangeSet | None = None
     results: list[dict] = []
     for (code, channel), old in target.items():
         attr = meta.attributes.get(code)
         if attr is None:
             results.append({"attribute_code": code, "outcome": "skipped", "message": "attribute no longer exists"})
             continue
+        group = meta.groups.get(attr.group_code)
+        if attr.is_erp or (group is not None and group.read_only):
+            # P1: the ERP is the system of record; a restore never puts stale ERP values back
+            results.append({"attribute_code": code, "outcome": "skipped", "message": "owned by the ERP and read-only in the PIM"})
+            continue
         if not user.can_approve_group(attr.group_code):
             results.append({"attribute_code": code, "outcome": "rejected", "message": "Restore requires Approve rights"})
             continue
+        if cs is None:
+            cs = new_change_set(session, "restore", user.email, f"restore {entity.label} to {at.isoformat()}", source_ref=entity.id)
         if old is None:
             res = clear_value(session, meta, user, entity, attr, channel or None, cs)
         else:
@@ -57,7 +64,7 @@ def restore_to(session: Session, meta: Metadata, user: CurrentUser, entity: Prod
                             source_ref=f"restore_to:{at.isoformat()}", change_set=cs, force=True)
         results.append({"attribute_code": code, "channel_code": channel or None, "outcome": res.outcome, "message": res.message})
     restored = sum(1 for r in results if r["outcome"] in ("approved", "draft"))
-    return {"change_set_id": cs.id, "restored": restored, "results": results}
+    return {"change_set_id": cs.id if cs else None, "restored": restored, "results": results}
 
 
 def list_change_sets(session: Session, kind: str | None = None, entity_id: str | None = None, page: int = 1, page_size: int = 50) -> dict:
@@ -74,9 +81,13 @@ def list_change_sets(session: Session, kind: str | None = None, entity_id: str |
     return {"rows": [change_set_out(r, counts.get(r.id, 0)) for r in rows], "total": total}
 
 
+GENERIC_ROLLBACK_KINDS = ("edit", "restore", "rule", "approval", "ai", "rollback")  # import and bulk roll back from their own pages; ingest never
+
+
 def change_set_out(cs: ChangeSet, changes: int | None = None) -> dict:
     return {"id": cs.id, "kind": cs.kind, "created_by": cs.created_by, "created_at": cs.created_at.isoformat(), "description": cs.description,
-            "source_ref": cs.source_ref, "rolled_back_at": cs.rolled_back_at.isoformat() if cs.rolled_back_at else None, "changes": changes}
+            "source_ref": cs.source_ref, "rolled_back_at": cs.rolled_back_at.isoformat() if cs.rolled_back_at else None, "changes": changes,
+            "rollbackable": cs.rolled_back_at is None and cs.kind in GENERIC_ROLLBACK_KINDS}
 
 
 def prune_history(session: Session, now: datetime | None = None, hot_years: float | None = None) -> int:

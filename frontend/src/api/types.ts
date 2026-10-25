@@ -1765,6 +1765,8 @@ export interface ChangeSet {
   rolled_back_at?: string | null;
   /** History rows in the set. */
   changes?: number | null;
+  /** False for import, bulk and ingest sets (they roll back from their own pages, or never) and for sets already rolled back. */
+  rollbackable?: boolean;
 }
 
 export interface ChangeSetList {

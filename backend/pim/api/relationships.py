@@ -6,13 +6,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from pim.api.deps import CurrentUser, Metadata, Session, get_current_user, get_meta, get_session
+from pim.api.products import _entity_or_404 as _entity
 from pim.auth.identity import require_permission
 from pim.models import ChangeSet, ProductEntity, ProductRelationship, RelationshipType, ValueHistory
 from pim.services import relationships as rel
 from pim.services.changesets import rollback_change_set
-from pim.services.history import change_set_out, list_change_sets, restore_to
+from pim.services.history import GENERIC_ROLLBACK_KINDS, change_set_out, list_change_sets, restore_to
 from pim.services.metadata import invalidate
 from pim.services.readiness import refresh_snapshots
 
@@ -45,13 +47,6 @@ class RestoreToBody(BaseModel):
 def _type_out(t: RelationshipType) -> dict:
     return {"code": t.code, "label": t.label, "direction": t.direction, "level": t.level, "allows_quantity": t.allows_quantity,
             "enabled": t.enabled, "sort_order": t.sort_order, "help_text": t.help_text}
-
-
-def _entity(session: Session, entity_id: str, user: CurrentUser) -> ProductEntity:
-    ent = session.get(ProductEntity, entity_id)
-    if ent is None or not user.in_brand_scope(ent.brand_scopes or []):
-        raise HTTPException(404, "Product not found")
-    return ent
 
 
 @router.get("/relationship-types")
@@ -96,7 +91,9 @@ def add_relationships(entity_id: str, body: RelationshipBody, session: Session =
         res = rel.add(session, user, ent, body.type_code, targets, body.quantity)
     except rel.RelationshipError as exc:
         raise HTTPException(400, str(exc)) from exc
-    refresh_snapshots(session, meta, [ent])
+    # DM-13 broken-link warnings live on both ends of a two-way link, so the targets are refreshed as well
+    targets = [t for t in (session.get(ProductEntity, r.to_entity_id) for r in res.created) if t is not None]
+    refresh_snapshots(session, meta, [ent, *targets])
     session.commit()
     return {"created": len(res.created), "skipped": res.skipped, "rows": rel.links_for(session, ent)}
 
@@ -110,8 +107,9 @@ def delete_relationship(relationship_id: str, session: Session = Depends(get_ses
     ent = _entity(session, r.from_entity_id, user)
     if not user.can("edit_relationships") and not user.can("admin_metadata") and not user.can_edit_group("style_details"):
         raise HTTPException(403, "No rights to edit relationships")
+    other = session.get(ProductEntity, r.to_entity_id)
     n = rel.remove(session, r)
-    refresh_snapshots(session, meta, [ent])
+    refresh_snapshots(session, meta, [ent, *([other] if other is not None else [])])
     session.commit()
     return {"deleted": n}
 
@@ -154,12 +152,22 @@ def change_set(change_set_id: str, session: Session = Depends(get_session), user
 @router.post("/change-sets/{change_set_id}/rollback")
 def rollback(change_set_id: str, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
              user: CurrentUser = Depends(get_current_user)) -> dict:
-    """Rolls a change set back as a unit (GOV-02). Values touched since are listed under `manual`, not reverted."""
+    """Rolls a change set back as a unit (GOV-02). Values touched since are listed under `manual`, not reverted.
+    Import batches and bulk actions roll back from their own endpoints (they also remove created entities and
+    update their own status); ERP ingest sets are never undone (P1)."""
     cs = session.get(ChangeSet, change_set_id)
     if cs is None:
         raise HTTPException(404, "Change set not found")
-    if not (user.can("admin_metadata") or user.can("bulk_edit") or cs.created_by == user.email):
-        raise HTTPException(403, "Only the author, a bulk editor or an admin can roll a change set back")
+    if cs.kind not in GENERIC_ROLLBACK_KINDS:
+        where = {"import": "the import batch page", "bulk": "the bulk action page"}.get(cs.kind)
+        raise HTTPException(409, f"A {cs.kind} change set rolls back from {where}" if where else f"A {cs.kind} change set cannot be rolled back")
+    # Approve rights on every group the set touched (the rollback writes with force and must not widen anyone's rights)
+    codes = {c for (c,) in session.execute(select(ValueHistory.attribute_code).where(ValueHistory.change_set_id == change_set_id).distinct())}
+    groups = {meta.attributes[c].group_code for c in codes if c in meta.attributes}
+    denied = sorted(g for g in groups if not user.can_approve_group(g))
+    if denied or not (user.can("admin_metadata") or user.can("bulk_edit") or cs.created_by == user.email):
+        raise HTTPException(403, "Rolling back needs Approve rights on " + ", ".join(denied) if denied else
+                            "Only the author, a bulk editor or an admin can roll a change set back")
     try:
         res = rollback_change_set(session, meta, user, change_set_id)
     except ValueError as exc:
