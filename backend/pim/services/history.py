@@ -16,10 +16,12 @@ from pim.services.metadata import Metadata
 from pim.services.values import NA_SENTINEL, WriteOutcome, clear_value, new_change_set, set_value
 
 
-def values_as_of(session: Session, entity_id: str, at: datetime) -> dict[tuple[str, str], dict | None]:
+def values_as_of(session: Session, entity_id: str, at: datetime, inclusive: bool = False) -> dict[tuple[str, str], dict | None]:
     """For every attribute that changed after `at`, the value the product held at `at` (None = no value then).
-    The earliest history row after `at` carries that value as its old_value."""
-    rows = session.execute(select(ValueHistory).where(ValueHistory.entity_id == entity_id, ValueHistory.set_at > at)
+    The earliest history row after `at` carries that value as its old_value. `inclusive` also undoes changes made
+    exactly at `at` (restoring to just before a given history row)."""
+    cond = ValueHistory.set_at >= at if inclusive else ValueHistory.set_at > at
+    rows = session.execute(select(ValueHistory).where(ValueHistory.entity_id == entity_id, cond)
                            .order_by(ValueHistory.set_at.asc())).scalars().all()
     out: dict[tuple[str, str], dict | None] = {}
     for h in rows:
@@ -30,10 +32,11 @@ def values_as_of(session: Session, entity_id: str, at: datetime) -> dict[tuple[s
 
 
 def restore_to(session: Session, meta: Metadata, user: CurrentUser, entity: ProductEntity, at: datetime,
-               attribute_codes: list[str] | None = None) -> dict:
-    """Restore the product's values to what they were at `at`, as one change set (GOV-02 whole-product restore).
-    Needs Approve rights on every touched group; attributes without rights are reported, not written."""
-    target = values_as_of(session, entity.id, at)
+               attribute_codes: list[str] | None = None, inclusive: bool = False) -> dict:
+    """Restore the product's values to what they were at `at` (or just before the change made at `at` when
+    `inclusive`), as one change set (GOV-02 whole-product restore). Needs Approve rights on every touched group;
+    attributes without rights are reported, not written."""
+    target = values_as_of(session, entity.id, at, inclusive)
     if attribute_codes:
         target = {k: v for k, v in target.items() if k[0] in attribute_codes}
     cs = new_change_set(session, "restore", user.email, f"restore {entity.label} to {at.isoformat()}", source_ref=entity.id)

@@ -216,6 +216,18 @@ def test_gov02_api_restore_to_and_change_set_rollback(client, session, meta, adm
     assert client.post(f"/api/change-sets/{cs_id}/rollback", headers=ADMIN).json()["restored"] == 1
     assert client.post(f"/api/change-sets/{cs_id}/rollback", headers=ADMIN).status_code == 409  # already rolled back
     assert client.get(f"/api/change-sets/{cs_id}", headers=ADMIN).json()["rolled_back_at"]
+    # the History tab's "Restore to this point" passes the row id: the row's own change is undone too
+    hist = client.get(f"/api/products/{fvp.id}/history?attribute_code=product_title", headers=ADMIN).json()["rows"]
+    two = next(h for h in hist if (h["new_value"] or {}).get("value") == "Two")
+    r = client.post(f"/api/products/{fvp.id}/restore-to", json={"history_id": two["id"]}, headers=ADMIN)
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    from pim.models import ProductValue
+
+    session.expire_all()
+    pv = session.execute(select(ProductValue).where(ProductValue.entity_id == fvp.id, ProductValue.attribute_code == "product_title")).scalars().one()
+    assert pv.value_text == "One"
+    assert client.post(f"/api/products/{fvp.id}/restore-to", json={}, headers=ADMIN).status_code == 400
+    assert client.post(f"/api/products/{fvp.id}/restore-to", json={"history_id": "nope"}, headers=ADMIN).status_code == 404
 
 
 def test_gov02_history_prune_keeps_the_hot_window(session, meta, admin, ingested):

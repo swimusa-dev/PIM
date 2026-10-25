@@ -51,7 +51,7 @@ style-colors (own and inherited, broken links left out); the transport PUT rejec
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/products/{id}/restore-to` | body `{at: ISO timestamp, attribute_codes?: string[]}`: restores every attribute that changed after `at` to the value it held then (a value that did not exist is cleared), as one change set of kind `restore`. Needs Approve rights per group; attributes without rights are reported `rejected`, nothing else is written. → `RestoreToResult` |
+| POST | `/api/products/{id}/restore-to` | body `{at?: ISO timestamp, history_id?: string, attribute_codes?: string[]}` (one of `at` or `history_id`; a history id restores to just before that change, its own row included): restores every attribute that changed after that point to the value it held then (a value that did not exist is cleared), as one change set of kind `restore`. Needs Approve rights per group; attributes without rights are reported `rejected`, nothing else is written. → `RestoreToResult` |
 | GET | `/api/change-sets?kind=&entity_id=&page=&page_size=` | `{rows: ChangeSet[], total}` newest first; `changes` = history rows in the set |
 | GET | `/api/change-sets/{id}` | `ChangeSet` |
 | POST | `/api/change-sets/{id}/rollback` | rolls the set back as a unit (values touched since are listed under `manual`, not reverted); allowed for the author, `bulk_edit` or `admin_metadata`; 409 when already rolled back → `RollbackResult` |

@@ -1,13 +1,14 @@
-// DM-09: Notification bell in the top bar. Polls the unread count every 60 seconds; clicking an
-// item marks it read and navigates to its link.
+// DM-09, DM-07: Notification bell in the top bar. Polls the unread count every 60 seconds; clicking an
+// item marks it read and navigates to its link. The dropdown ends with the email digest frequency
+// (Phase 6, GET/PUT /api/me/settings).
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
-import type { Notification } from "../api/types";
+import { api, settingsApi } from "../api/client";
+import type { DigestFrequency, Notification } from "../api/types";
 import { formatDate } from "../lib/format";
-import { Badge, ErrorBox, Spinner } from "./Common";
+import { Badge, ErrorBox, Spinner, useToast } from "./Common";
 
 const KIND_COLOR: Record<string, string> = {
   mention: "purple",
@@ -23,6 +24,7 @@ export function NotificationBell() {
   const hostRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
 
   const q = useQuery({
     queryKey: ["notifications"],
@@ -32,6 +34,15 @@ export function NotificationBell() {
   const markRead = useMutation({
     mutationFn: (ids?: string[]) => api.notifications.markRead(ids),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+  const settings = useQuery({ queryKey: ["me", "settings"], queryFn: settingsApi.get, enabled: open, staleTime: 60_000 });
+  const saveDigest = useMutation({
+    mutationFn: (digest_frequency: DigestFrequency) => settingsApi.save({ digest_frequency }),
+    onSuccess: (s) => {
+      qc.setQueryData(["me", "settings"], s);
+      toast(s.digest_frequency === "off" ? "Email digest turned off." : `Email digest set to ${s.digest_frequency}.`, "ok");
+    },
+    onError: (e) => toast(`Could not save the digest setting: ${(e as Error).message}`, "error"),
   });
 
   useEffect(() => {
@@ -94,6 +105,22 @@ export function NotificationBell() {
               <div className="faint small">{formatDate(n.created_at)}</div>
             </div>
           ))}
+          <div className="row" style={{ justifyContent: "space-between", padding: "8px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 6 }}>
+            <label className="inline small" title="One email per day or week with your unread notifications">
+              Email digest
+              <select
+                value={settings.data?.digest_frequency ?? "daily"}
+                disabled={settings.isLoading || saveDigest.isPending}
+                onChange={(e) => saveDigest.mutate(e.target.value as DigestFrequency)}
+              >
+                <option value="daily">daily</option>
+                <option value="weekly">weekly</option>
+                <option value="off">off</option>
+              </select>
+            </label>
+            {settings.isError && <span className="field-error small">Settings unavailable</span>}
+            {settings.data?.last_digest_at && <span className="faint small">last sent {formatDate(settings.data.last_digest_at)}</span>}
+          </div>
         </div>
       )}
     </div>

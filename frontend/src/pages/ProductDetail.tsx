@@ -1,13 +1,13 @@
-// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, IMG-05, GOV-02, GOV-03, EXP-03, EXP-12, AI-03, AI-05, AI-06:
+// DM-05, DM-01, DM-06, DM-07, DM-09, DM-11, DM-12, DM-13, IMG-05, GOV-02, GOV-03, EXP-03, EXP-12, AI-03, AI-05, AI-06:
 // Product detail page. Header with identifiers, hierarchy tree, completeness per channel with "show only missing
-// required", attribute groups, channel override compare, images panel, history tab, comments tab, Ask AI tab
-// (hidden without run_ai), workflow panel, carryover, compare link, eligibility reasons and overrides per channel,
-// and the quality score checks per channel.
+// required", attribute groups, channel override compare, images panel, history tab, comments tab, Relationships tab
+// (Phase 6), Ask AI tab (hidden without run_ai), workflow panel, carryover, compare link, eligibility reasons and
+// overrides per channel, readiness warnings, and the quality score checks per channel.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, relationshipApi } from "../api/client";
 import { canRunAi, useChannels, useMe, useOptionLists } from "../api/hooks";
 import type { OptionList } from "../api/types";
 import { Badge, ErrorBox, LifecycleBadge, PercentPill, ReadinessPill, Spinner, Tabs } from "../components/Common";
@@ -16,6 +16,7 @@ import { AttributeForm } from "../detail/AttributeForm";
 import { ImagesPanel } from "../detail/ImagesPanel";
 import { HistoryTab } from "../detail/HistoryTab";
 import { CommentsTab } from "../detail/CommentsTab";
+import { RelationshipsTab } from "../detail/RelationshipsTab";
 import { WorkflowPanel } from "../detail/WorkflowPanel";
 import { CarryoverDialog } from "../detail/CarryoverDialog";
 import { EligibilityPanel } from "../detail/EligibilityPanel";
@@ -23,7 +24,7 @@ import { AskAiPanel } from "../detail/AskAiPanel";
 import { QualityPanel } from "../detail/QualityPanel";
 import { LEVEL_LABEL } from "../lib/format";
 
-type Tab = "attributes" | "images" | "history" | "comments" | "ai";
+type Tab = "attributes" | "images" | "history" | "comments" | "relationships" | "ai";
 
 export function ProductDetailPage() {
   const { id = "" } = useParams();
@@ -45,6 +46,8 @@ export function ProductDetailPage() {
     enabled: !!compareChannel,
   });
   const tree = useQuery({ queryKey: ["product", id, "tree"], queryFn: () => api.products.tree(id) });
+  // DM-13: shared with the Relationships tab (same key) so the tab label carries the count.
+  const relationships = useQuery({ queryKey: ["product", id, "relationships"], queryFn: () => relationshipApi.list(id) });
 
   const listByCode = useMemo(() => {
     const m: Record<string, OptionList> = {};
@@ -205,6 +208,7 @@ export function ProductDetailPage() {
               { key: "images", label: "Images", count: detail.data!.images.length },
               { key: "history", label: "History", count: detail.data!.history_count },
               { key: "comments", label: "Comments" },
+              { key: "relationships", label: "Relationships", count: relationships.data?.rows.length },
               ...(showAi ? [{ key: "ai" as Tab, label: "Ask AI" }] : []),
             ]}
           />
@@ -238,6 +242,7 @@ export function ProductDetailPage() {
           {tab === "images" && <ImagesPanel entityId={entity.entity_id} />}
           {tab === "history" && <HistoryTab entityId={entity.entity_id} attributes={allAttributes} optionLists={listByCode} />}
           {tab === "comments" && <CommentsTab entityId={entity.entity_id} attributes={allAttributes} />}
+          {tab === "relationships" && <RelationshipsTab entityId={entity.entity_id} level={entity.level} />}
           {tab === "ai" && showAi && (
             <AskAiPanel entityId={entity.entity_id} attributes={allAttributes} optionLists={listByCode} onGoToAttribute={goToAttribute} />
           )}
@@ -309,6 +314,13 @@ export function ProductDetailPage() {
                       </div>
                     )}
                     {r.reasons.length > 0 && <div className="small muted">{r.reasons.join("; ")}</div>}
+                    {(r.warnings ?? []).length > 0 && (
+                      <ul className="reasons small" style={{ color: "var(--amber)" }} title="Warnings never block a publish">
+                        {r.warnings!.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 );
               })}

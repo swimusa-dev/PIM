@@ -233,7 +233,7 @@ export const api = {
         `/api/products/${encodeURIComponent(entityId)}/history/${encodeURIComponent(historyId)}/restore`,
       ),
     // Phase 6 (GOV-02): restore every attribute that changed after `at` to the value it held then.
-    restoreTo: (entityId: string, body: { at: string; attribute_codes?: string[] }) =>
+    restoreTo: (entityId: string, body: { at?: string; history_id?: string; attribute_codes?: string[] }) =>
       post<RestoreToResult>(`/api/products/${encodeURIComponent(entityId)}/restore-to`, body),
     tree: (entityId: string) => get<ProductTree>(`/api/products/${encodeURIComponent(entityId)}/tree`),
     images: (entityId: string) => get<ProductImages>(`/api/products/${encodeURIComponent(entityId)}/images`),

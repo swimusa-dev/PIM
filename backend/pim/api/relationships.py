@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from pim.api.deps import CurrentUser, Metadata, Session, get_current_user, get_meta, get_session
 from pim.auth.identity import require_permission
-from pim.models import ChangeSet, ProductEntity, ProductRelationship, RelationshipType
+from pim.models import ChangeSet, ProductEntity, ProductRelationship, RelationshipType, ValueHistory
 from pim.services import relationships as rel
 from pim.services.changesets import rollback_change_set
 from pim.services.history import change_set_out, list_change_sets, restore_to
@@ -37,7 +37,8 @@ class RelationshipTypeBody(BaseModel):
 
 
 class RestoreToBody(BaseModel):
-    at: datetime
+    at: datetime | None = None  # the point in time; or
+    history_id: str | None = None  # a history row: restore to just before that change
     attribute_codes: list[str] | None = None
 
 
@@ -120,7 +121,15 @@ def delete_relationship(relationship_id: str, session: Session = Depends(get_ses
 def restore_product_to(entity_id: str, body: RestoreToBody, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
                        user: CurrentUser = Depends(get_current_user)) -> dict:
     ent = _entity(session, entity_id, user)
-    res = restore_to(session, meta, user, ent, body.at, body.attribute_codes)
+    at, inclusive = body.at, False
+    if body.history_id:
+        h = session.get(ValueHistory, body.history_id)
+        if h is None or h.entity_id != ent.id:
+            raise HTTPException(404, "History row not found")
+        at, inclusive = h.set_at, True
+    if at is None:
+        raise HTTPException(400, "Give either at or history_id")
+    res = restore_to(session, meta, user, ent, at, body.attribute_codes, inclusive)
     refresh_snapshots(session, meta, [ent])
     session.commit()
     return res

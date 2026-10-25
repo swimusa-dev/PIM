@@ -222,6 +222,42 @@ fields.
 - `POST /api/packages/{id}/sandbox-run` is allowed from the UI only when the package is `ready` or `reconciled`;
   executed runs refetch the package to pick up the stored `sandbox_report`.
 
+## Phase 6 additions
+
+Built to `docs/api-contract-phase6.md` (relationships, whole-product restore and change sets, digest settings,
+adapter error rates). The client additions live in `src/api/client.ts` as `relationshipApi`, `changeSetApi`,
+`settingsApi` and `api.products.restoreTo`; the interfaces (`RelationshipType`, `Relationship`,
+`RelationshipAddResult`, `ChangeSet`, `RestoreToResult`, `RollbackResult`, `MeSettings`, `AdapterErrorRate`) are
+appended to `src/api/types.ts`, `Readiness` gained the optional `warnings` list and `Telemetry` the optional
+`adapter_error_rates`.
+
+- New file `src/detail/RelationshipsTab.tsx` (DM-13): the product detail Relationships tab (count in the tab label)
+  lists own and inherited links grouped by type, the target as a link to its product page, "Inherited from style"
+  and amber "Broken" badges, quantity when present, Remove on own links, and an add form with a type select limited
+  to the product's level, a debounced product search picker over `POST /api/products/query`, a paste box for a
+  comma-separated list, a quantity input when the type allows it, and the skipped tokens with reasons after an add.
+  The form and Remove are hidden without edit on the `style_details` group (the `*` wildcard applies, admins pass).
+- `src/detail/HistoryTab.tsx` (GOV-02): "Restore to this point" per row opens a confirm dialog, posts
+  `POST /api/products/{id}/restore-to` with the row's `set_at` and shows the restored count and per-attribute
+  outcomes; the Change sets panel below the table lists `GET /api/change-sets?entity_id=` with a kind badge, who,
+  when, description, changes and Roll back (replaced by the rolled back date once `rolled_back_at` is set); the
+  rollback result shows the restored count and the `manual` list when not empty.
+- `src/components/NotificationBell.tsx` (DM-07, DM-09): the dropdown ends with an Email digest select (daily,
+  weekly, off) backed by `GET/PUT /api/me/settings`, with a toast on save.
+- `src/admin/Telemetry.tsx` (GOV-04): an Adapter error rates table (adapter, calls, errors, rate pill green under
+  5 percent, amber under 20, red otherwise, "no calls" for null, last error with time) above the Adapter errors list.
+- Readiness `warnings` are rendered in the product detail Readiness panel (amber list) and in the readiness pill
+  tooltip used by the grid and the detail header.
+
+### Phase 6 contract assumptions
+
+- Relationship types are filtered to `enabled` ones whose `level` equals the product's level; SKUs get a note
+  instead of the form. The first matching type is preselected.
+- `POST .../relationships` is sent with `targets` (entity ids from the picker) and `paste` together when both are
+  filled; `quantity` is only sent for a type with `allows_quantity`.
+- `GET /api/change-sets` is paged 50 rows per page; the rollback result's extra keys are ignored.
+- `GET /api/me/settings` is only requested while the bell dropdown is open; the select shows `daily` until it loads.
+
 ## Grid keyboard reference (DM-03)
 
 - Arrow keys move the active cell, Shift+Arrow extends the selection, Tab / Shift+Tab move horizontally.

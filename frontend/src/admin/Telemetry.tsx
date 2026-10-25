@@ -1,9 +1,70 @@
-// GOV-04, IMP-09: Operational telemetry (job runs, adapter errors, AI spend) and "Run ingest now".
+// GOV-04, IMP-09: Operational telemetry (job runs, adapter errors, adapter error rates over 30 days, AI spend)
+// and "Run ingest now".
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { AdapterErrorRate } from "../api/types";
 import { Empty, ErrorBox, Spinner, StatusBadge, useToast } from "../components/Common";
 import { formatDate } from "../lib/format";
+
+/** Error rate as a percent pill: green under 5 percent, amber under 20, red otherwise; null means no calls. */
+function ErrorRatePill({ rate }: { rate: number | null }) {
+  if (rate === null || rate === undefined || Number.isNaN(rate)) return <span className="faint">no calls</span>;
+  const pct = rate * 100;
+  const cls = pct < 5 ? "p-high" : pct < 20 ? "p-mid" : "p-low";
+  return <span className={`pill ${cls}`}>{pct < 10 ? pct.toFixed(1) : Math.round(pct)}%</span>;
+}
+
+function AdapterErrorRates({ rows }: { rows: AdapterErrorRate[] }) {
+  const windowDays = rows[0]?.window_days;
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3>Adapter error rates</h3>
+        {windowDays !== undefined && <span className="muted small">last {windowDays} days</span>}
+      </div>
+      <div className="panel-body flush" style={{ maxHeight: 300, overflow: "auto" }}>
+        {rows.length === 0 ? (
+          <div className="empty">No adapter calls recorded in the window.</div>
+        ) : (
+          <table className="data compact">
+            <thead>
+              <tr>
+                <th>Adapter</th>
+                <th>Calls</th>
+                <th>Errors</th>
+                <th>Error rate</th>
+                <th>Last error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.adapter}>
+                  <td className="mono">{r.adapter}</td>
+                  <td>{r.calls}</td>
+                  <td>{r.errors}</td>
+                  <td>
+                    <ErrorRatePill rate={r.error_rate} />
+                  </td>
+                  <td className="small">
+                    {r.last_error ? (
+                      <>
+                        {r.last_error}
+                        {r.last_error_at && <div className="faint nowrap">{formatDate(r.last_error_at)}</div>}
+                      </>
+                    ) : (
+                      <span className="faint">none</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function TelemetryTab() {
   const qc = useQueryClient();
@@ -102,6 +163,7 @@ export function TelemetryTab() {
               )}
             </div>
           </div>
+          <AdapterErrorRates rows={t.adapter_error_rates ?? []} />
           <div className="panel">
             <div className="panel-header">
               <h3>Adapter errors</h3>
