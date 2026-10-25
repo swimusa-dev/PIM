@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     feature_image_ai_match: bool = False  # IMG-03 tier 3, on once PLT-00 step 8 passes
     feature_channel_send: bool = False  # EXP-05/06: actually call retailer adapters; off until credentials and tests exist
     ai_mapping_confidence_threshold: float = 0.70  # IMP-02
+    feature_ai_mapping_suggest: bool = False  # IMP-02: ask the classify endpoint for header mappings the fuzzy matcher missed
+    history_hot_years: float = 2.0  # GOV-02: history rows older than this leave Lakebase once copied to Delta
+    app_base_url: str = ""  # DM-07/DM-09 digest links, for example https://pim-xxxx.databricksapps.com
 
     @property
     def is_databricks(self) -> bool:

@@ -75,7 +75,11 @@ def main() -> None:
                                                                    json.dumps(h.new_value), h.source_type, h.set_by, h.set_at.isoformat(),
                                                                    h.change_set_id, h.version)) + ")" for h in hist[i:i + 500])
             sql(f"MERGE INTO {a.catalog}.{a.schema}.value_history t USING (SELECT * FROM VALUES {values} AS v(id, entity_id, attribute_code, channel_code, old_value, new_value, source_type, set_by, set_at, change_set_id, version)) src ON t.id = src.id WHEN NOT MATCHED THEN INSERT *")
-        mark_job_run(session, "succeeded", {"gold_rows": len(rows), "history_rows": len(hist)})
+        # GOV-02: the Delta copy now holds every history row, so rows past the hot window leave Lakebase
+        from pim.services.history import prune_history
+
+        pruned = prune_history(session) if hist else 0
+        mark_job_run(session, "succeeded", {"gold_rows": len(rows), "history_rows": len(hist), "history_pruned": pruned})
 
 
 def _lit(v) -> str:  # noqa: ANN001

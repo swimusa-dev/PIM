@@ -35,3 +35,13 @@ class Notification(Base, IdMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserSetting(Base):
+    """Per-user preferences (DM-07, DM-09): how often the notification digest is emailed."""
+
+    __tablename__ = "user_setting"
+    email: Mapped[str] = mapped_column(String(200), primary_key=True)
+    digest_frequency: Mapped[str] = mapped_column(String(8), default="daily")  # daily | weekly | off
+    last_digest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

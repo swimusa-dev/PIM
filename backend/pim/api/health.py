@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from pim import __version__
 from pim.api.deps import CurrentUser, Session, get_current_user, get_session
 from pim.config import get_settings
 from pim.models._common import utcnow
+from pim.services.collab import set_digest_frequency, user_setting
 from pim.services.ingest import latest_successful_load
 
 router = APIRouter(prefix="/api", tags=["health"])
@@ -32,3 +34,30 @@ def health(session: Session = Depends(get_session)) -> dict:
 @router.get("/me")
 def me(user: CurrentUser = Depends(get_current_user)) -> dict:
     return user.as_dict()
+
+
+class MeSettingsBody(BaseModel):
+    digest_frequency: str
+
+
+def _settings_out(us) -> dict:  # noqa: ANN001
+    return {"email": us.email, "digest_frequency": us.digest_frequency,
+            "last_digest_at": us.last_digest_at.isoformat() if us.last_digest_at else None}
+
+
+@router.get("/me/settings")
+def me_settings(session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+    """DM-07, DM-09: the signed-in user's digest preference (daily by default)."""
+    us = user_setting(session, user.email)
+    session.commit()
+    return _settings_out(us)
+
+
+@router.put("/me/settings")
+def put_me_settings(body: MeSettingsBody, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+    try:
+        us = set_digest_frequency(session, user.email, body.digest_frequency)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    session.commit()
+    return _settings_out(us)

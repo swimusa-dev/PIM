@@ -78,6 +78,12 @@ env:
   - name: PIM_FEATURE_IMAGE_AI_MATCH
     # IMG-03 tier 3 (Air semantic search plus vision model) stays off until PLT-00 step 8 passes.
     value: "false"
+  - name: PIM_FEATURE_AI_MAPPING_SUGGEST
+    value: "false"  # IMP-02: classify-endpoint suggestions for unmatched import columns (Phase 6)
+  - name: PIM_HISTORY_HOT_YEARS
+    value: "2"  # GOV-02: history older than this leaves Lakebase after the Delta merge (Phase 6)
+  - name: PIM_APP_BASE_URL
+    value: ""  # DM-07/DM-09: app URL used in digest email links (Phase 6)
   - name: PIM_FEATURE_CHANNEL_SEND
     # EXP-05: retailer API sends stay off until Phase 5 credentials and sandbox tests exist; publishes still
     # validate, write the payload and (for Shopify) build the EXP-13 package.

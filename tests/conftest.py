@@ -32,7 +32,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 MUTABLE_TABLES = [
     "import_conflict", "import_row", "import_batch", "mapping_template", "worksheet_export", "bulk_action", "rule_run", "rule",
-    "comment", "notification",
+    "comment", "notification", "user_setting", "product_relationship",
     "ai_output", "ai_run", "ai_eval_run", "ai_eval_case", "quality_snapshot",
     "publish_item", "eligibility_override", "image_rendition",
     "update_package_row", "update_package", "publish_record", "asset_link", "asset", "value_history", "value_draft",

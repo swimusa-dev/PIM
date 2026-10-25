@@ -19,7 +19,7 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | ARC-02 Lakebase + Delta | Built / Seam | token-rotating pool; gold and history publish job; CDF behind a flag |
 | ARC-03 EAV with provenance | Built | `models/product.py`, `services/values.py` |
 | ARC-04 Lakeflow Jobs | Built | `resources/jobs.yml`, `jobs/*.py`, `services/jobs.py` enqueues from the app |
-| ARC-05 Adapters | Built / Seam | bluecherry, air, shopify (read), feed_file built; walmart, mirakl, target_plus stubs |
+| ARC-05 Adapters | Built | bluecherry, air, shopify, feed_file, walmart_mp, rithum built; mirakl not built by decision (D-01); target_plus is the rules layer over Rithum (D-02) |
 | 1.3 Metadata layer | Built | seeds, admin API and screens, reference entity types, requirement sets |
 | RBAC-01 to RBAC-04 | Built | roles, data rights, channel rights, brand scopes, server-side checks; group mapper needs PLT-00 step 3 |
 | IMP-09 Style Master ingest | Built | `services/ingest.py` (CSV and Delta sources), launch workflow start, stale banner |
@@ -32,7 +32,7 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | DM-05 Product detail | Built | groups, completeness, missing-required toggle, provenance |
 | DM-11 Reference entities | Built | Print, Fabric, Model profile; impact count before save |
 | DM-14 Size scales | Built | scale order sort, channel mappings, unmapped flag |
-| GOV-02 History and restore | Built | field-level history, single-attribute restore; change-set rollback as a unit is Partial |
+| GOV-02 History and restore | Built | field-level history, single-attribute restore; change-set rollback as a unit (Phase 2), whole-product restore to a point in time and hot retention (Phase 6) |
 | GOV-04 Telemetry | Partial | request ids, structured logs, app_event, admin page; enable UC app telemetry on the workspace |
 | GOV-05 Secrets | Built | secret resources via `valueFrom`; never logged |
 | GOV-06 Defaults | Built / Partial | defaults tagged and excluded from completeness; calculated-attribute preview and suspicious-constant check belong to GOV-01 (Phase 2) |
@@ -49,7 +49,7 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | DM-09 Comments and mentions | Built | per product and per attribute, `@first.last` or `@email` mentions, in-app notifications with a bell, digest seam |
 | DM-10 Dashboards | Built | |
 | DM-12 Carryover | Built | sibling colors with approved value counts; copy as drafts without overwriting; launch workflow skips steps whose groups are already approved |
-| DM-13 Relationships | Not started | optional per v1.3 (Layer owns Shopify cross-sell data) |
+| DM-13 Relationships | Built (Phase 6) | optional per v1.3; built for retailer and marketplace feeds, no Shopify field written (D-09) |
 | IMP-01 Import wizard | Built | Upload, Map, Validate, Match, Review and Commit; CSV and XLSX with multiple sheets, header row detection, merged group headers, text dates; files stored in the import volume; nothing touches product data before commit |
 | IMP-02 Mapping templates | Built | templates per source auto-applied by structure signature; up to four sources per target; transforms trim, split, concat, regex extract, value replace, unit convert, HTML clean, date parse, case; header-similarity suggestions with confidence (AI suggester is a hook), hidden below 70 percent, never auto-accepted; required targets block progress |
 | IMP-03 Value mapping | Built | distinct incoming values per select attribute with suggestions, remembered per source |
@@ -105,3 +105,15 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | IMG-04 Image embeddings | Not built | by design: tiers 1 and 2 plus Air semantic search first; revisit if unmatched images remain |
 | D-13 Matrixify | Built | `matrixify.xlsx` beside the native CSVs in every Shopify package (Products and Variants sheets, Command UPDATE, metafield columns typed from the bulk snapshot) |
 | D-05 merch lead | Built | `merch_lead` role with `view_cost` and view on the cost group |
+
+## Phase 6, closing phase (not in the spec's build order; everything still Partial, Seam or Not started that needs no workspace)
+
+| ID | Status | Notes |
+|---|---|---|
+| DM-13 Relationships | Built | `relationship_type` seeded (Goes Great With two-way, You May Also Like, Set / Pairs With with quantity, Replaced By at the style level), `product_relationship` with mirrors for two-way types, pasted style-color lists, validation (exists, level, not discontinued, brand scope), style links inherited by colors, broken links as readiness warnings, `related:<type>` feed source; no link seeded and no Shopify field written (D-09) (`services/relationships.py`, Relationships tab) |
+| GOV-02 History and restore | Built | adds restore of a whole product to a point in time as one change set, change-set listing and rollback as a unit for any set (`/api/change-sets`), and hot retention: `PIM_HISTORY_HOT_YEARS` (2) pruned by the history publish job after the Delta merge (`services/history.py`) |
+| DM-07 / DM-09 digest | Built | one email per user through `PIM_SMTP_*` with links on `PIM_APP_BASE_URL`, daily, weekly or off per user (`/api/me/settings`, bell menu); failed sends stay queued; without SMTP the seam logs as before |
+| IMP-02 AI suggester | Built behind `PIM_FEATURE_AI_MAPPING_SUGGEST` | `imports/ai_mapping.py` asks the classify endpoint (template `import_mapping_suggest`) for columns the header matcher missed; confidence shown, unknown codes dropped, never applied without a person |
+| GOV-04 Telemetry | Built / workspace step pending | `adapter_error` events from publish, delivery, feedback poll and Air poll failures with credentials scrubbed; error rates per adapter over 30 days on Admin > Telemetry; enabling UC app telemetry stays a workspace step |
+| ARC-05 Adapters | Built | `target_plus.py` is the Target+ rules layer over the Rithum feed (D-02); `mirakl_seller.py` states the path is not built (D-01); no `TODO(decision)` left for resolved decisions |
+| Still needing the workspace | Seam | PLT-00 spikes, RBAC group mapper (PLT-00 step 3), UC app telemetry, Air field names (step 7), vision endpoint (step 8), CDF (D-06: off), IMG-04 (by design) |

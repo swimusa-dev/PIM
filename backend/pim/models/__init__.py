@@ -11,7 +11,7 @@ from pim.models.ai import (  # noqa: F401
     QualitySettings,
     QualitySnapshot,
 )
-from pim.models.collab import Comment, Notification  # noqa: F401
+from pim.models.collab import Comment, Notification, UserSetting  # noqa: F401
 from pim.models.exports import EligibilityOverride, ImageRendition, PublishItem  # noqa: F401
 from pim.models.imports import (  # noqa: F401
     BulkAction,
@@ -68,3 +68,4 @@ from pim.models.product import (  # noqa: F401
     ValueHistory,
 )
 from pim.models.rbac import BrandScope, Role, SavedView, UserRole  # noqa: F401
+from pim.models.relationships import ProductRelationship, RelationshipType  # noqa: F401

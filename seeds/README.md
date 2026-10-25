@@ -16,5 +16,7 @@ code and never deletes.
 | `images.yml` | Shot types and filename patterns | IMG-02, IMG-03 |
 | `workflows.yml` | The New style-color launch workflow | DM-07, IMP-09 |
 | `value_mappings.yml` | ERP raw value to option mappings | IMP-11 |
+| `ai.yml` | Brand voices and prompt templates | AI-02 |
+| `relationships.yml` | Relationship types (no links seeded; Layer owns Shopify cross-sell data) | DM-13, D-09 |
 
 Load with `python -m pim.cli seed` (uses `PIM_DATABASE_URL` or the bound Lakebase resource).

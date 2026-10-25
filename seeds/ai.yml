@@ -159,3 +159,22 @@ templates:
       The ERP color description is "{{attr.erp_color_description}}". Write the customer-facing color name in
       Title Case, expanding abbreviations (FSTVL = Festival, BLK = Black, NVY = Navy, WHT = White, ECO = Eco).
       Return the name only.
+  # IMP-02 (Phase 6): header mapping suggestions for import columns the fuzzy matcher could not place. Runs only with
+  # PIM_FEATURE_AI_MAPPING_SUGGEST=true; suggestions are shown with a confidence and never auto-accepted (P4).
+  - code: import_mapping_suggest
+    label: Suggest import column mappings
+    task_type: classify
+    target_attribute: null
+    input_attributes: []
+    model_task: classify
+    status: active
+    body: |
+      An import file for {{attr.level}} level product data has columns that could not be matched to PIM attributes by
+      name. For each column, pick the PIM attribute it most likely feeds, using the header and the sample values.
+      Return JSON only: a list of {"column": "<column header exactly as given>", "attribute_code": "<code from the list>",
+      "confidence": <0 to 1>, "reason": "<one short sentence>"}. Leave out any column that matches nothing. Never invent
+      an attribute code.
+      Columns with samples:
+      {{attr.columns}}
+      PIM attributes (code, label, level, type):
+      {{attr.attributes}}

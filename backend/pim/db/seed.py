@@ -188,6 +188,13 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
         if fp["regex"] not in existing_patterns:
             session.add(FilenamePattern(**fp))
 
+    # Relationship types (DM-13)
+    from pim.models import RelationshipType
+
+    for rt in _load("relationships.yml").get("relationship_types", []):
+        _upsert(session, RelationshipType, "code", rt)
+    session.flush()
+
     # AI (AI-02): brand voices and templates; a template whose body changed gets a new version
     ai = _load("ai.yml")
     from pim.models import BrandVoice, PromptTemplate, PromptTemplateVersion

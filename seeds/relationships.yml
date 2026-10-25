@@ -1,0 +1,12 @@
+# DM-13 relationship types (v1.1, narrowed in v1.3). Goes Great With and You May Also Like exist as types but no
+# links are seeded: Layer owns that data on Shopify (D-09). Link products here only for a retailer or marketplace
+# channel that asks for related products or sets; the Shopify adapter keeps those metafields protected.
+relationship_types:
+  - {code: goes_great_with, label: Goes Great With, direction: two_way, level: style_color, allows_quantity: false, sort_order: 10,
+     help_text: "Outfit pairings. Two-way: linking A to B also links B to A."}
+  - {code: you_may_also_like, label: You May Also Like, direction: one_way, level: style_color, allows_quantity: false, sort_order: 20,
+     help_text: "Alternatives shown with this product. One-way."}
+  - {code: set_pairs_with, label: Set / Pairs With, direction: two_way, level: style_color, allows_quantity: true, sort_order: 30,
+     help_text: "The other half of a set (top and bottom). Quantity for multi-piece sets."}
+  - {code: replaced_by, label: Replaced By, direction: one_way, level: style, allows_quantity: false, sort_order: 40,
+     help_text: "The style that supersedes this one. Set at the style level; colors inherit it."}
