@@ -2054,3 +2054,19 @@ table.data tr.expanded-row > td {
 .checks li.passed {
   color: var(--text-muted);
 }
+
+/* ---------- Phase 5: transport tab, sandbox report (EXP-10, D-03) ---------- */
+.feed-table input,
+.feed-table select {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.feed-table td {
+  vertical-align: middle;
+}
+.feed-table tr.value-map-row td {
+  background: var(--teal-faint);
+}
+table.data tr.protected-changed td {
+  background: var(--red-bg);
+}

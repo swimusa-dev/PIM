@@ -99,15 +99,24 @@ channels:
       customer_color_name: color
       color_family: colorCategory
       erp_style_content: fabricContent
+      core.style_number: variantGroupId
+      core.upc: productId
+      core.sku: sku
     eligibility:
       brand_scopes: [vitamin_a]
       exclude_classifications: [exclusive_brand, private_label]
       exclude_lifecycle: [discontinued]
       exclude_entity_types: [prepack]
-    config: {spec_version: "5.0", feed_type: MP_ITEM, max_items_per_feed: 5000}
+    # EXP-08: MP_ITEM feeds through the Walmart API once PIM_FEATURE_CHANNEL_SEND is on and the secrets are bound
+    config:
+      transport: api
+      file_format: json
+      feed_type: MP_ITEM
+      walmart: {spec_version: "5.0", product_type: Swimwear, max_items_per_feed: 5000, variant_attribute_names: [color, clothingSize]}
+  # D-02 (2026-10-25): Target+ through Rithum, the same connection as Nordstrom (EXP-11). Family rules on.
   - code: targetplus
     label: Target+
-    adapter: target_plus
+    adapter: rithum
     kind: marketplace
     enabled: false
     requirement_set: targetplus_apparel
@@ -118,10 +127,15 @@ channels:
       allow_classifications_for_subdivision: {exclusive_brand: [TARGET], private_label: [TARGET]}
       exclude_lifecycle: [discontinued]
       exclude_entity_types: [prepack]
-    config: {integrator: "TODO(decision: D-02)"}
+    config:
+      transport: download
+      file_format: xlsx
+      row_level: sku
+      rithum: {program: targetplus, family_rules: true, supplier_id: null, vpn_prefix: null}
+  # D-01 (2026-10-25): Nordstrom drop-ship through Rithum (EXP-10); template-based flat file, image naming per [C21]
   - code: nordstrom
     label: Nordstrom
-    adapter: feed_file
+    adapter: rithum
     kind: retailer
     enabled: false
     requirement_set: nordstrom_apparel
@@ -131,4 +145,9 @@ channels:
       brand_scopes: [vitamin_a]
       exclude_classifications: [exclusive_brand, private_label]
       exclude_lifecycle: [discontinued]
-    config: {path: "TODO(decision: D-01)", image_naming: "VPN-SupplierColorName-01"}
+    config:
+      transport: download
+      file_format: xlsx
+      row_level: sku
+      rithum: {program: nordstrom_dropship, family_rules: false, supplier_id: null, vpn_prefix: null}
+      image_profile_naming: "{{style_number}}-{{customer_color_name}}-{{seq}}"

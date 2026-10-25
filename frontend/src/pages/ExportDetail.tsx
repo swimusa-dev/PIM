@@ -1,18 +1,23 @@
-// EXP-04, EXP-05: Publish detail. Summary, payload preview (pretty JSON, or a table for flat CSV-type
-// payloads), files to download, items with status filters and their issues and errors (internal / external
-// pills, attribute chips linking to the product), retailer feedback upload or adapter poll, and the link to
-// the EXP-13 package for package-transport channels.
+// EXP-04, EXP-05, Phase 5 EXP-08, EXP-09: Publish detail. Summary, payload preview (pretty JSON, or a table for
+// flat CSV-type payloads), files to download, items with status filters and their issues and errors (internal /
+// external pills, attribute chips linking to the product), retailer feedback upload or adapter poll, the link to
+// the EXP-13 package for package-transport channels, the delivery card with "Deliver now" (summary.delivery),
+// the Walmart feed card with "Poll now" (summary.walmart) and the Listing quality column on items.
 
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { publishApi } from "../api/client";
+import { channelApi, publishApi } from "../api/client";
 import { useAttributes, useChannels } from "../api/hooks";
 import type { PayloadIssue, PublishItem, PublishItemError, PublishItemStatus } from "../api/types";
 import { Badge, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
 import { formatBytes, formatDate } from "../lib/format";
 import { ErrorKindPill } from "../admin/channel/HealthTab";
 import { KindBadge, PublishStatusBadge } from "../exports/shared";
+import { DeliveryCard, ListingQualityPill, WalmartFeedCard, isDeliveryResult, isWalmartSummary, listingQualityMap } from "../exports/DeliveryCards";
+
+// Summary keys rendered as cards rather than in the key / value list.
+const CARD_SUMMARY_KEYS = new Set(["preview", "delivery", "walmart", "listing_quality"]);
 
 const ITEM_STATUSES: PublishItemStatus[] = ["pending", "valid", "invalid", "submitted", "accepted", "rejected", "in_review"];
 
@@ -51,6 +56,17 @@ export function ExportDetailPage() {
   const attrLabel = (code: string) => attrs.data?.find((a) => a.code === code)?.label ?? code;
   const p = q.data;
   const channel = channels.data?.find((c) => c.code === p?.channel_code);
+  // Phase 5: the channel transport decides whether "Deliver now" is offered (sftp or email).
+  const transportQ = useQuery({
+    queryKey: ["channel", p?.channel_code ?? "", "transport"],
+    queryFn: () => channelApi.transport(p!.channel_code),
+    enabled: !!p && p.kind !== "dry_run",
+    retry: false,
+  });
+  const effectiveTransport = transportQ.data?.transport ?? (channel?.config?.transport ? String(channel.config.transport) : null);
+  const delivery = isDeliveryResult(p?.summary?.delivery) ? p!.summary.delivery : null;
+  const walmart = isWalmartSummary(p?.summary?.walmart) ? p!.summary.walmart : null;
+  const qualityByExternalId = useMemo(() => listingQualityMap(p?.summary?.listing_quality), [p]);
   const preview = useMemo(() => {
     const pv = p?.summary?.preview;
     return Array.isArray(pv) ? (pv as Record<string, unknown>[]) : [];
@@ -63,6 +79,9 @@ export function ExportDetailPage() {
 
   const shownItems: PublishItem[] = items.data?.rows ?? (status === "" && page === 1 ? (p?.items ?? []) : []);
   const itemTotal = items.data?.total ?? p?.items.length ?? 0;
+  const qualityOf = (it: PublishItem): number | null | undefined =>
+    it.listing_quality ?? (it.external_id && qualityByExternalId[it.external_id] !== undefined ? qualityByExternalId[it.external_id] : undefined);
+  const showQuality = shownItems.some((it) => qualityOf(it) !== undefined && qualityOf(it) !== null);
   const statusCounts = useMemo(() => {
     const m: Record<string, number> = {};
     for (const it of p?.items ?? []) m[it.status] = (m[it.status] ?? 0) + 1;
@@ -192,15 +211,22 @@ export function ExportDetailPage() {
                 <SummaryRow key={k} k={k} v={v} />
               ))}
               {Object.entries(p.summary)
-                .filter(([k]) => k !== "preview")
+                .filter(([k]) => !CARD_SUMMARY_KEYS.has(k))
                 .map(([k, v]) => (
                   <SummaryRow key={k} k={k} v={v} />
                 ))}
             </dl>
-            {Object.keys(p.selection).length + Object.keys(p.summary).filter((k) => k !== "preview").length === 0 && <span className="muted">No summary recorded.</span>}
+            {Object.keys(p.selection).length + Object.keys(p.summary).filter((k) => !CARD_SUMMARY_KEYS.has(k)).length === 0 && <span className="muted">No summary recorded.</span>}
           </div>
         </div>
       </div>
+
+      {(p.kind !== "dry_run" || delivery) && (
+        <div className={walmart ? "two-col" : undefined}>
+          <DeliveryCard publishId={p.id} delivery={delivery} transport={effectiveTransport} canDeliver={p.kind !== "dry_run" && p.status !== "running"} />
+          {walmart && <WalmartFeedCard walmart={walmart} polling={feedback.isPending} canPoll={p.kind !== "dry_run"} onPoll={() => feedback.mutate(null)} />}
+        </div>
+      )}
 
       <div className="panel">
         <div className="panel-header">
@@ -294,6 +320,7 @@ export function ExportDetailPage() {
                   <th>Status</th>
                   <th>Issues</th>
                   <th>Errors</th>
+                  {showQuality && <th title="Walmart Listing Quality score (0 to 100)">Listing quality</th>}
                   <th>Updated</th>
                 </tr>
               </thead>
@@ -330,6 +357,11 @@ export function ExportDetailPage() {
                         </div>
                       )}
                     </td>
+                    {showQuality && (
+                      <td>
+                        <ListingQualityPill value={qualityOf(it)} />
+                      </td>
+                    )}
                     <td className="nowrap small">{formatDate(it.updated_at)}</td>
                   </tr>
                 ))}

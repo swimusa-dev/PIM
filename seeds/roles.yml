@@ -27,6 +27,11 @@ roles:
     permissions: [export]
     data_rights: {"*": view}
     channel_rights: {}
+  - code: merch_lead
+    label: Merchandising Lead (cost visibility, D-05)
+    permissions: [import, bulk_edit, run_ai, approve, export, view_cost]
+    data_rights: {"*": view, style_details: approve, design_tech: approve, merch: approve, ref_print: approve, ref_fabric: approve, cost: view}
+    channel_rights: {}
   - code: finance
     label: Finance (cost visibility, D-05)
     permissions: [view_cost]

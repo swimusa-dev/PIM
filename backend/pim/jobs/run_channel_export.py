@@ -36,12 +36,16 @@ def main() -> None:
                 continue
             report["runs"][ch.code] = publishing.run_scheduled(s, meta, ch, requested_by="scheduler", force=force)
             s.commit()
-        for rec in s.execute(select(PublishRecord).where(PublishRecord.status == "submitted", PublishRecord.external_batch_id.isnot(None))).scalars():
+        # A Walmart publish reads partial or rejected after its first poll while later items still process, so the
+        # candidate set is wider than status == submitted; feedback_pending decides per record.
+        pending = s.execute(select(PublishRecord).where(PublishRecord.status.in_(["submitted", "partial", "rejected", "accepted"]),
+                                                        PublishRecord.external_batch_id.isnot(None))).scalars()
+        for rec in pending:
             ch = next((c for c in channels if c.code == rec.channel_code), None)
-            if ch is None:
+            if ch is None or not publishing.feedback_pending(rec):
                 continue
             try:
-                report["feedback"][rec.id] = publishing.poll_feedback(s, meta, ch, rec)
+                report["feedback"][rec.id] = publishing.poll_feedback(s, meta, ch, rec, force=False)  # Walmart: 15 min, 1 h, 2 h, then 4 h
             except (NotConfigured, NotImplementedError) as exc:
                 report["feedback"][rec.id] = {"skipped": str(exc)[:200]}
             s.commit()

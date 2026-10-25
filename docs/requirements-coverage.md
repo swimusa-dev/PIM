@@ -71,7 +71,7 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | EXP-04 Validate and dry run | Built | payload per style-color from mapping plus transforms (concatenate, format, unit convert, conditional, case, truncate, value map), validation against the loaded schema (required, type, enum, length, range) and raw JSON Schema for Walmart, dry run writes the payload file and a validation report, issues link back to our attribute (`export/payloads.py`, Exports page) |
 | EXP-05 Publish history | Built | `publish_record` plus one `publish_item` per product for every dry run, package, publish and scheduled run; retailer feedback from an error report file (CSV, JSON, XLSX) or adapter poll, mapped to attributes, tagged internal or external, rejections notify the owning role; health score and top errors per channel (`export/publishing.py`). Retailer API sends stay behind `PIM_FEATURE_CHANNEL_SEND=false` until Phase 5 credentials exist |
 | EXP-06 Delta and full exports | Built | delta = values, images or readiness changed since the last successful publish (plus never sent); per-channel schedule (every N hours or daily at a time, saved view scope) run by the `pim_channel_export` job; a run in progress is skipped, never queued (`/api/channels/{code}/delta`, `/schedule`, `/schedule/run-now`) |
-| EXP-07 Shopify direct writes | Seam | feature flag off; read path built; write path raises until D-03 and owner approval |
+| EXP-07 Shopify direct writes | Built, flag off (D-03: sandbox test first) | targeted mutations (productUpdate, metafieldsSet in batches of 25, productVariantsBulkUpdate), protected fields never planned, a before and after check on Layer's recommendation metafields; runs only against the development store (`PIM_SHOPIFY_SANDBOX_DOMAIN`) from Packages > Shopify sandbox; production writes stay behind `PIM_FEATURE_SHOPIFY_DIRECT_WRITE=false` |
 | EXP-12 Eligibility | Built | brand scope, classification, lifecycle, entity type; ineligible products are skipped from runs unless a PIM Admin records an override with a reason (and optional expiry), logged as an app event (`eligibility_override`, product detail readiness panel) |
 | EXP-13 Shopify update package | Built | API or CSV snapshot, diff, workbook, import CSVs per Shopify rules, review round trip, reconcile |
 | IMG-01 Air poll | Built | adapter with rate limiting and backoff; job |
@@ -94,12 +94,14 @@ has yet run on the Swim USA Databricks workspace (see docs/platform-findings.md)
 | AI-07 Evaluation set | Built | `ai_eval_case` built from approved human-written values (50 by default), `ai_eval_run` scores token overlap, length, grounding and brand voice; a composite drop beyond `PIM_AI_EVAL_THRESHOLD` against the last passed run blocks the template (activation refused); MLflow logging when `PIM_MLFLOW_EXPERIMENT` is set; per-template acceptance rate, edit distance and rejection reasons at `/api/ai/metrics` |
 | GOV-03 Quality score | Built | `services/quality.py`: casing, spelling heuristics, length within attribute and channel limits, blocked terms, duplicate copy, image technical rules, unsupported certification claims; admin-excluded groups, weights and grade bands; A to E per channel plus overall in `quality_snapshot`; grid columns and filters, product panel, dashboard by family, season and channel; nightly `pim_quality_score` job and refresh on value change |
 
-## Phase 5, marketplaces
+## Phase 5, marketplaces and feeds
 
-| ID | Status |
-|---|---|
-| EXP-08 Walmart | Seam (feed shape, variant-group validation, polling cadence constants) |
-| EXP-09 Retailer feeds | Partial (`feed_file` adapter with always-include, case transform, value maps; delivery and templates pending) |
-| EXP-10 Nordstrom | Seam (D-01) |
-| EXP-11 Target+ | Seam (D-02) |
-| IMG-04 Image embeddings | Seam (flag) |
+| ID | Status | Notes |
+|---|---|---|
+| EXP-08 Walmart Marketplace | Built behind `PIM_FEATURE_CHANNEL_SEND` | OAuth token, MP_ITEM feeds batched at the profile's item limit with the spec version pinned, variant groups (stable id, up to 3 attribute names, one primary, swatch check), MP_MAINTENANCE feed, feed and item status polling on the 15 minute, 1 hour, 2 hour, then 4 hour cadence with PROCESSED-but-INPROGRESS handling, ingestion errors into the feedback loop, Listing Quality per item into channel health (`adapters/walmart_mp.py`); credentials from `walmart-client-id` and `walmart-client-secret` secrets |
+| EXP-09 Retailer data feeds | Built | feed columns per channel (always include even if empty, case transform, value map, required), XLSX template fill preserving formatting, one row per SKU with GTIN and NRF color and size codes from option value mappings, delivery by download, SFTP (paramiko, secret from an app resource) or email (SMTP), Admin > Channels > Transport (`adapters/feed_file.py`, `services/delivery.py`) |
+| EXP-10 Nordstrom | Built (D-01: Rithum drop-ship) | `adapters/rithum.py` program `nordstrom_dropship`: template-based flat file on the feed renderer, VPN-SupplierColorName-01 image naming, AI imagery disclosure column; the default column set is UNCONFIRMED until the Rithum account template is uploaded; the Mirakl path is not built |
+| EXP-11 Target+ | Built (D-02: Rithum) | same adapter, program `targetplus` with family rules: title of 150 or less, GS1 GTIN, 1:1 main image of 1200 px or more, one invalid child fails the family (all UNCONFIRMED [C17]) |
+| IMG-04 Image embeddings | Not built | by design: tiers 1 and 2 plus Air semantic search first; revisit if unmatched images remain |
+| D-13 Matrixify | Built | `matrixify.xlsx` beside the native CSVs in every Shopify package (Products and Variants sheets, Command UPDATE, metafield columns typed from the bulk snapshot) |
+| D-05 merch lead | Built | `merch_lead` role with `view_cost` and view on the cost group |

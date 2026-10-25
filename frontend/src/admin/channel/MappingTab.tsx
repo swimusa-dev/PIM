@@ -2,6 +2,7 @@
 // metadata-driven attribute picker (attributes grouped by attribute group, core identifiers, or a dotted
 // reference path typed by hand), a transforms list editor for the contract ops, the value-mappings summary
 // per select attribute, and the gaps box. The save itself lives in ChannelEditor (PUT mapping, RBAC-03).
+// Phase 5 (EXP-10): the picker groups and AttributePicker are exported for the Transport tab.
 
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -47,12 +48,13 @@ function defaultArgs(op: ChannelTransformOp): Record<string, unknown> {
   }
 }
 
-interface PickerGroup {
+export interface PickerGroup {
   label: string;
   options: { value: string; label: string; attr?: AttributeDefinition }[];
 }
 
-function useAttributePickerGroups(): { groups: PickerGroup[]; loading: boolean; byCode: Map<string, AttributeDefinition> } {
+/** Attribute picker groups shared with the Phase 5 Transport tab (feed column sources, Walmart variant attributes). */
+export function useAttributePickerGroups(): { groups: PickerGroup[]; loading: boolean; byCode: Map<string, AttributeDefinition> } {
   const attrs = useAttributes();
   const groups = useGroups();
   return useMemo(() => {

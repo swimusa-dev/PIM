@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from pim.adapters.base import NotConfigured
 from pim.api.deps import CurrentUser, Metadata, Session, get_current_user, get_meta, get_session
 from pim.api.packages import safe_filename
-from pim.api.schemas import EligibilityOverrideBody, MappingBody, RunBody, ScheduleBody
+from pim.api.schemas import EligibilityOverrideBody, MappingBody, RunBody, ScheduleBody, TransportBody
 from pim.export import publishing
 from pim.export.schema_loaders import SchemaLoadError, TargetSchema, diff_schemas, load_for_adapter
 from pim.models import AppEvent, Channel, EligibilityOverride, ProductEntity, PublishItem, PublishRecord
@@ -156,6 +156,154 @@ def put_mapping(code: str, body: MappingBody, session: Session = Depends(get_ses
 
 
 # ---------------------------------------------------------------------------------------------------
+# Transport and feed templates (EXP-09, EXP-10, EXP-11)
+# ---------------------------------------------------------------------------------------------------
+TRANSPORTS = ("download", "sftp", "email", "api", "package")
+CASE_MODES = ("as_is", "title", "sentence", "upper", "lower")
+
+
+def transport_out(ch: Channel) -> dict:
+    cfg = ch.config or {}
+    return {"transport": cfg.get("transport") or ("package" if ch.adapter == "shopify_admin" else "download"),
+            "file_format": cfg.get("file_format") or ("json" if ch.adapter == "walmart_mp" else "csv"), "header_row": int(cfg.get("header_row") or 1),
+            "row_level": cfg.get("row_level") or ("sku" if ch.adapter == "rithum" else "style_color"),
+            "feed_template_path": cfg.get("feed_template_path"), "feed_template_name": cfg.get("feed_template_name"),
+            "feed_columns": cfg.get("feed_columns") or [], "sftp": cfg.get("sftp"), "email": cfg.get("email"),
+            "walmart": cfg.get("walmart"), "rithum": cfg.get("rithum")}
+
+
+@router.get("/channels/{code}/transport")
+def get_transport(code: str, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+    return transport_out(_channel(session, code))
+
+
+@router.put("/channels/{code}/transport")
+def put_transport(code: str, body: TransportBody, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
+                  user: CurrentUser = Depends(get_current_user)) -> dict:
+    _require_edit_profile(user, code)
+    ch = _channel(session, code)
+    if body.transport not in TRANSPORTS:
+        raise HTTPException(400, f"transport must be one of {', '.join(TRANSPORTS)}")
+    if body.file_format not in ("csv", "xlsx", "json", "shopify_csv"):
+        raise HTTPException(400, "file_format must be csv, xlsx or json")
+    if body.row_level not in (None, "sku", "style_color"):
+        raise HTTPException(400, "row_level must be sku or style_color")
+    cols = []
+    for c in body.feed_columns:
+        header = str(c.get("header") or "").strip()
+        if not header:
+            raise HTTPException(400, "Every feed column needs a header")
+        src = str(c.get("source") or "").strip()
+        base = src.split(".", 1)[0]
+        if src and not (src.startswith(("core.", "erp.", "image:", "const:")) or src in ("image_ai_flag", "nrf_color", "nrf_size", "gtin")
+                        or base in meta.attributes):
+            raise HTTPException(400, f"Unknown feed column source {src!r} for {header}")
+        if c.get("case_transform", "as_is") not in CASE_MODES:
+            raise HTTPException(400, f"case_transform for {header} must be one of {', '.join(CASE_MODES)}")
+        cols.append({"header": header, "source": src, "always_include": bool(c.get("always_include")), "required": bool(c.get("required")),
+                     "case_transform": c.get("case_transform", "as_is"), "value_map": {str(k): str(v) for k, v in (c.get("value_map") or {}).items()}})
+    if body.transport == "sftp" and not ((body.sftp or {}).get("host") and (body.sftp or {}).get("username")):
+        raise HTTPException(400, "SFTP needs a host and a username")
+    if body.transport == "sftp" and not str((body.sftp or {}).get("host_key") or "").strip():
+        raise HTTPException(400, "SFTP needs the server's host key (ssh-keyscan output or a SHA256 fingerprint) so uploads go only to that server")
+    if body.transport == "email" and not [t for t in ((body.email or {}).get("to") or []) if t]:
+        raise HTTPException(400, "Email delivery needs at least one recipient")
+    if body.walmart:
+        names = [n for n in (body.walmart.get("variant_attribute_names") or []) if n]
+        if len(names) > 3:
+            raise HTTPException(400, "Walmart allows at most 3 variant attribute names")
+        if int(body.walmart.get("max_items_per_feed") or 5000) <= 0:
+            raise HTTPException(400, "max_items_per_feed must be positive")
+    if body.rithum and body.rithum.get("program") not in (None, "nordstrom_dropship", "targetplus"):
+        raise HTTPException(400, "rithum.program must be nordstrom_dropship or targetplus")
+    cfg = dict(ch.config or {})
+    cfg.update({"transport": body.transport, "file_format": body.file_format, "header_row": max(1, body.header_row), "feed_columns": cols,
+                "sftp": body.sftp, "email": body.email, "walmart": body.walmart, "rithum": body.rithum})
+    if body.row_level:
+        cfg["row_level"] = body.row_level
+    ch.config = cfg
+    ch.version += 1
+    session.commit()
+    invalidate()
+    return transport_out(ch)
+
+
+@router.post("/channels/{code}/feed-template")
+async def upload_feed_template(code: str, file: UploadFile, session: Session = Depends(get_session), meta: Metadata = Depends(get_meta),
+                               user: CurrentUser = Depends(get_current_user)) -> dict:
+    _require_edit_profile(user, code)
+    ch = _channel(session, code)
+    name = safe_filename(file.filename, "template.xlsx")
+    content = await file.read()
+    if not name.lower().endswith((".xlsx", ".csv")):
+        raise HTTPException(400, "Upload an XLSX or CSV template")
+    header_row = int((ch.config or {}).get("header_row") or 1)
+    try:
+        if name.lower().endswith(".xlsx"):
+            schema = load_for_adapter("feed_file", {name: content})
+            columns = [f.name for f in schema.fields]
+        else:
+            import csv
+            import io
+
+            reader = csv.reader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+            rows = list(reader)
+            columns = [c.strip() for c in (rows[header_row - 1] if len(rows) >= header_row else [])]
+            schema = None
+    except SchemaLoadError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    full = publishing.storage().write(f"templates/{code}/{name}", content)
+    cfg = dict(ch.config or {})
+    cfg["feed_template_path"], cfg["feed_template_name"] = full, name
+    existing = {c.get("header") for c in cfg.get("feed_columns") or []}
+    cfg["feed_columns"] = list(cfg.get("feed_columns") or []) + [{"header": h, "source": "", "always_include": False, "required": False,
+                                                                 "case_transform": "as_is", "value_map": {}} for h in columns if h and h not in existing]
+    if name.lower().endswith(".xlsx"):
+        cfg["file_format"] = "xlsx"
+    ch.config = cfg
+    schema_loaded = False
+    if schema is not None and not (ch.target_schema or {}).get("fields"):
+        ch.target_schema = schema.as_dict()
+        schema_loaded = True
+    ch.version += 1
+    session.commit()
+    invalidate()
+    return {"feed_template_path": full, "feed_template_name": name, "columns": columns, "schema_loaded": schema_loaded}
+
+
+@router.get("/channels/{code}/feed-template")
+def download_feed_template(code: str, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)):
+    ch = _channel(session, code)
+    path, name = (ch.config or {}).get("feed_template_path"), (ch.config or {}).get("feed_template_name") or "template.xlsx"
+    if not path:
+        raise HTTPException(404, "No template uploaded")
+    data = publishing.storage().read(path)
+    media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if name.endswith(".xlsx") else "text/csv"
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{safe_filename(name, "template.xlsx")}"'})
+
+
+@router.post("/publishes/{publish_id}/deliver")
+def deliver_now(publish_id: str, session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+    rec = session.get(PublishRecord, publish_id)
+    if rec is None:
+        raise HTTPException(404, "Publish not found")
+    ch = _channel(session, rec.channel_code)
+    _require_run(user, ch.code)
+    transport = (ch.config or {}).get("transport") or "download"
+    if transport not in ("sftp", "email"):
+        raise HTTPException(409, f"The channel transport is {transport}; only SFTP and email deliveries can be sent")
+    if rec.kind == "dry_run":
+        raise HTTPException(409, "Dry runs are never delivered")
+    if not publishing.send_enabled():
+        raise HTTPException(409, "Deliveries are off until PIM_FEATURE_CHANNEL_SEND is true")
+    result = publishing.deliver_publish(session, ch, rec)
+    session.commit()
+    if result.get("status") == "failed":
+        raise HTTPException(409, result.get("detail") or "Delivery failed")
+    return result
+
+
+# ---------------------------------------------------------------------------------------------------
 # Runs (EXP-04, EXP-05)
 # ---------------------------------------------------------------------------------------------------
 def _run(session: Session, meta: Metadata, user: CurrentUser, code: str, body: RunBody, kind: str) -> dict:
@@ -225,7 +373,9 @@ def publish_items(publish_id: str, status: str | None = None, page: int = 1, pag
     total = session.execute(select(func.count()).select_from(q.subquery())).scalar_one()
     items = session.execute(q.order_by(PublishItem.entity_id).offset((page - 1) * page_size).limit(page_size)).scalars().all()
     labels = _labels(session, items)
-    return {"rows": [item_out(i, labels.get(i.entity_id, i.entity_id)) for i in items], "total": total}
+    rec = session.get(PublishRecord, publish_id)
+    lq = ((rec.summary or {}).get("listing_quality") or {}) if rec else {}
+    return {"rows": [{**item_out(i, labels.get(i.entity_id, i.entity_id)), "listing_quality": lq.get(i.external_id or "")} for i in items], "total": total}
 
 
 @router.get("/publishes/{publish_id}/files/{name}")

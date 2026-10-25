@@ -445,6 +445,60 @@ def build_import_csvs(rows: list[UpdatePackageRow], snap: ShopifySnapshot) -> li
     return files
 
 
+def build_matrixify_workbook(rows: list[UpdatePackageRow], snap: ShopifySnapshot) -> bytes:
+    """D-13: a Matrixify-format workbook beside the native CSVs. One `Products` sheet with `Command: UPDATE` rows
+    keyed by Handle (and the Shopify ID when the snapshot has it), product columns in Matrixify names, metafields
+    as `Metafield: <namespace>.<key> [<type>]` columns, and variant rows carrying Variant SKU plus their fields.
+    Only included rows; an intentional clear writes an empty cell, an untouched field stays absent (blank cells
+    in Matrixify mean "no change" only when the column is omitted, so columns are per sheet, not per row)."""
+    from openpyxl import Workbook
+
+    included = [r for r in rows if r.include]
+    col_map = {"Title": "Title", "Body (HTML)": "Body HTML", "Type": "Type", "Vendor": "Vendor", "Tags": "Tags",
+               "SEO Title": "SEO Title", "SEO Description": "SEO Description", "Product Category": "Category", "Status": "Status"}
+    product_cols: list[str] = []
+    product_rows: dict[str, dict[str, Any]] = {}
+    variant_cols: list[str] = []
+    variant_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in included:
+        val = "" if r.is_clear else (r.proposed_value or "")
+        if r.scope == "product":
+            col = col_map.get(r.field, r.field)
+        elif r.scope == "metafield":
+            mtype = ((snap.by_handle(r.handle) or {}).get("metafield_types") or {}).get(r.field, "single_line_text_field")
+            col = f"Metafield: {r.field} [{mtype}]"
+        elif r.scope in ("variant", "variant_metafield"):
+            sku = (r.variant_key or {}).get("sku") or ""
+            col = r.field if r.scope == "variant" else f"Variant Metafield: {r.field} [single_line_text_field]"
+            if col not in variant_cols:
+                variant_cols.append(col)
+            variant_rows.setdefault((r.handle, sku), {"Handle": r.handle, "Command": "UPDATE", "Variant SKU": sku})[col] = val
+            continue
+        else:
+            continue
+        if col not in product_cols:
+            product_cols.append(col)
+        prod = snap.by_handle(r.handle) or {}
+        row = product_rows.setdefault(r.handle, {"ID": prod.get("id") or "", "Handle": r.handle, "Command": "UPDATE"})
+        row[col] = val
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    header = ["ID", "Handle", "Command", *product_cols]
+    ws.append(header)
+    for row in product_rows.values():
+        ws.append([row.get(c, None) for c in header])
+    if variant_rows:
+        wv = wb.create_sheet("Variants")
+        vheader = ["Handle", "Command", "Variant SKU", *variant_cols]
+        wv.append(vheader)
+        for row in variant_rows.values():
+            wv.append([row.get(c, None) for c in vheader])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _split_csv(stem: str, header: list[str], rows: list[dict]) -> list[tuple[str, bytes]]:
     out: list[tuple[str, bytes]] = []
     part, buf, w = 1, io.StringIO(), None
@@ -504,10 +558,11 @@ def write_files(session: Session, pkg: UpdatePackage, rows: list[UpdatePackageRo
     base = f"{pkg.id}/v{pkg.version}"
     files = [("review_workbook.xlsx", build_review_workbook(pkg, rows, skipped))]
     files += build_import_csvs(rows, snap)
+    files.append(("matrixify.xlsx", build_matrixify_workbook(rows, snap)))  # D-13
     pkg.files = []
     for name, data in files:
         full = storage.write(f"{base}/{name}", data)
-        kind = "workbook" if name.endswith(".xlsx") else "import_csv"
+        kind = "matrixify" if name == "matrixify.xlsx" else ("workbook" if name.endswith(".xlsx") else "import_csv")
         pkg.files.append({"name": name, "size": len(data), "kind": kind, "path": full})
     pkg.storage_path = storage.path(base)
 

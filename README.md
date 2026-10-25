@@ -74,6 +74,16 @@ that fails any invented claim (AI-06), an evaluation set with a regression gate 
 the A to E data quality score with configurable checks (GOV-03). Every AI output lands as a suggestion; nothing is
 written to a product without a person. See `docs/api-contract-phase4.md` and section 8c of the setup guide.
 
+## Phase 5 (marketplaces, feeds, Shopify sandbox)
+
+Phase 5 follows the owner decisions of 2026-10-25: Nordstrom drop-ship and Target+ both go through Rithum as
+template-based flat files with one-row-per-SKU feeds, GTIN and NRF codes, and delivery by download, SFTP or email
+(EXP-09, EXP-10, EXP-11); Walmart Marketplace is the direct API adapter with MP_ITEM feeds, variant groups, status
+polling on Walmart's cadence and Listing Quality in channel health, behind a send flag (EXP-08); every Shopify
+package adds a Matrixify workbook (D-13); the Shopify write path runs only against a development store with a
+protected-fields report (D-03); and a merchandising lead role sees cost (D-05). See `docs/api-contract-phase5.md`
+and section 8d of the setup guide.
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status

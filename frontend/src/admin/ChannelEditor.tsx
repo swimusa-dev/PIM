@@ -1,6 +1,7 @@
-// EXP-01, EXP-02, EXP-05, EXP-06, IMG-07: expandable channel editor with tabs Target schema, Mapping,
-// Image profile, Schedule and Health. Mapping and image profile share one draft saved with
-// PUT /api/channels/{code}/mapping (needs the edit_profile channel right, RBAC-03).
+// EXP-01, EXP-02, EXP-05, EXP-06, IMG-07, Phase 5 EXP-09, EXP-10, EXP-11: expandable channel editor with tabs
+// Target schema, Mapping, Image profile, Transport, Schedule and Health. Mapping and image profile share one
+// draft saved with PUT /api/channels/{code}/mapping (needs the edit_profile channel right, RBAC-03); the
+// Transport tab saves its own draft with PUT /api/channels/{code}/transport.
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,8 +14,9 @@ import { MappingTab } from "./channel/MappingTab";
 import { EMPTY_IMAGE_PROFILE, ImageProfileTab } from "./channel/ImageProfileTab";
 import { ScheduleTab } from "./channel/ScheduleTab";
 import { HealthTab } from "./channel/HealthTab";
+import { TransportTab } from "./channel/TransportTab";
 
-type EditorTab = "schema" | "mapping" | "images" | "schedule" | "health";
+type EditorTab = "schema" | "mapping" | "images" | "transport" | "schedule" | "health";
 
 // EXP-01: the API stores attribute_mapping as PIM source (attribute code, ref path, core.<field>) -> target field.
 // The editor keys its draft by target field, so the map is inverted on load and on save.
@@ -79,6 +81,7 @@ export function ChannelEditor({ channel }: { channel: Channel }) {
             { key: "schema", label: "Target schema", count: schema.data?.fields.length },
             { key: "mapping", label: "Mapping", count: gapCount || undefined },
             { key: "images", label: "Image profile" },
+            { key: "transport", label: "Transport" },
             { key: "schedule", label: "Schedule" },
             { key: "health", label: "Health" },
           ]}
@@ -117,6 +120,7 @@ export function ChannelEditor({ channel }: { channel: Channel }) {
       {tab === "images" && draft && (
         <ImageProfileTab profile={draft.image_profile ?? EMPTY_IMAGE_PROFILE} setProfile={(p) => update({ ...draft, image_profile: p })} canEdit={canEdit} />
       )}
+      {tab === "transport" && <TransportTab channel={channel} canEdit={canEdit} />}
       {tab === "schedule" && <ScheduleTab channel={channel} canEdit={canEdit} />}
       {tab === "health" && <HealthTab channel={channel} />}
     </div>

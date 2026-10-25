@@ -1,5 +1,6 @@
 // Typed fetch helpers for every endpoint in docs/api-contract.md, docs/api-contract-phase2.md,
-// docs/api-contract-phase3.md and docs/api-contract-phase4.md (AI-01 to AI-07, GOV-03 at the end of the file).
+// docs/api-contract-phase3.md, docs/api-contract-phase4.md (AI-01 to AI-07, GOV-03) and docs/api-contract-phase5.md
+// (EXP-08, EXP-09, EXP-10, EXP-11, D-03, D-13: channel transport, feed templates, delivery, Walmart feeds, Shopify sandbox).
 // All calls go through `request` so errors surface the server's `{detail}` message.
 
 import type {
@@ -106,6 +107,10 @@ import type {
   QualityScore,
   QualitySettings,
   TemplatePreview,
+  ChannelTransport,
+  DeliveryResult,
+  FeedTemplateUpload,
+  SandboxReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -261,6 +266,10 @@ export const api = {
       return request<PackageDetail>(`/api/packages/${encodeURIComponent(id)}/review-upload`, { method: "POST", body: fd });
     },
     reconcile: (id: string) => post<PackageDetail>(`/api/packages/${encodeURIComponent(id)}/reconcile`),
+    // Phase 5 (D-03): targeted-mutation plan, or the run against the sandbox store. 409 when the sandbox store
+    // is not configured (PIM_SHOPIFY_SANDBOX_DOMAIN and PIM_SHOPIFY_SANDBOX_TOKEN); callers check ApiError.status.
+    sandboxRun: (id: string, planOnly: boolean) =>
+      post<SandboxReport>(`/api/packages/${encodeURIComponent(id)}/sandbox-run`, { plan_only: planOnly }),
   },
 
   // ---- Images (IMG-03, IMG-05, IMG-06, IMG-07) ----
@@ -485,6 +494,18 @@ export const channelApi = {
   schedule: (code: string) => get<ExportSchedule>(`/api/channels/${encodeURIComponent(code)}/schedule`),
   saveSchedule: (code: string, body: ExportSchedule) => put<ExportSchedule>(`/api/channels/${encodeURIComponent(code)}/schedule`, body),
   runNow: (code: string) => post<RunNowResult>(`/api/channels/${encodeURIComponent(code)}/schedule/run-now`),
+
+  // ---- Phase 5: transport and feed templates (EXP-09, EXP-10, EXP-11) ----
+  transport: (code: string) => get<ChannelTransport>(`/api/channels/${encodeURIComponent(code)}/transport`),
+  // Needs edit_profile (RBAC-03); bumps the channel version.
+  saveTransport: (code: string, body: ChannelTransport) =>
+    put<ChannelTransport>(`/api/channels/${encodeURIComponent(code)}/transport`, body),
+  uploadFeedTemplate: (code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<FeedTemplateUpload>(`/api/channels/${encodeURIComponent(code)}/feed-template`, { method: "POST", body: fd });
+  },
+  feedTemplateUrl: (code: string) => `/api/channels/${encodeURIComponent(code)}/feed-template`,
 };
 
 export const publishApi = {
@@ -498,6 +519,9 @@ export const publishApi = {
     if (file) fd.append("file", file);
     return request<FeedbackResult>(`/api/publishes/${encodeURIComponent(id)}/feedback`, { method: "POST", body: fd });
   },
+  // Phase 5 (EXP-09): (re)sends the publish's files through the channel transport (SFTP or email).
+  // 409 when the transport is download or not configured; callers check ApiError.status.
+  deliver: (id: string) => post<DeliveryResult>(`/api/publishes/${encodeURIComponent(id)}/deliver`),
 };
 
 // ---- Eligibility (EXP-12) ----

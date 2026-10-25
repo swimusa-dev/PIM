@@ -1,11 +1,13 @@
-// EXP-05: Channel health tab. Health score pill, accepted / rejected / in review counts, last publish and
-// open rejections, top errors with internal / external pills.
+// EXP-05, Phase 5 EXP-08: Channel health tab. Health score pill, accepted / rejected / in review counts, last
+// publish and open rejections, top errors with internal / external pills, and for Walmart the listing quality
+// average pill and the feeds in progress count.
 
 import { useQuery } from "@tanstack/react-query";
 import { channelApi } from "../../api/client";
 import type { Channel } from "../../api/types";
 import { Badge, Empty, ErrorBox, PercentPill, Spinner } from "../../components/Common";
 import { formatDate } from "../../lib/format";
+import { ListingQualityPill } from "../../exports/DeliveryCards";
 
 export function ErrorKindPill({ kind }: { kind: "internal" | "external" }) {
   return kind === "external" ? (
@@ -24,7 +26,7 @@ export function HealthTab({ channel }: { channel: Channel }) {
   if (q.isLoading) return <Spinner label="Loading channel health" />;
   if (q.isError) return <ErrorBox error={q.error} title="Could not load channel health" />;
   const h = q.data!;
-  if (h.publishes === 0) {
+  if (h.publishes === 0 && !(h.feeds_in_progress && h.feeds_in_progress > 0)) {
     return <Empty title="No publishes yet">Health is computed from publish results and retailer feedback once the channel has been published to.</Empty>;
   }
   return (
@@ -60,6 +62,22 @@ export function HealthTab({ channel }: { channel: Channel }) {
           <div className="card-title">Open rejections</div>
           <div className={`card-value${h.open_rejections > 0 ? " alert" : ""}`}>{h.open_rejections}</div>
         </div>
+        {h.listing_quality_avg !== undefined && (
+          <div className="card">
+            <div className="card-title">Listing quality avg</div>
+            <div className="card-value">
+              <ListingQualityPill value={h.listing_quality_avg} />
+            </div>
+            <div className="faint small">Walmart Listing Quality, 0 to 100</div>
+          </div>
+        )}
+        {h.feeds_in_progress !== undefined && (
+          <div className="card">
+            <div className="card-title">Feeds in progress</div>
+            <div className={`card-value${h.feeds_in_progress > 0 ? " alert" : ""}`}>{h.feeds_in_progress}</div>
+            <div className="faint small">Submitted feeds still being polled</div>
+          </div>
+        )}
         <div className="card">
           <div className="card-title">Last publish</div>
           <div style={{ fontWeight: 600 }}>{h.last_publish_at ? formatDate(h.last_publish_at) : <span className="faint">never</span>}</div>

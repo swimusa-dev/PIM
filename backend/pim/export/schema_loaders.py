@@ -326,7 +326,7 @@ def load_for_adapter(adapter: str, files: dict[str, bytes] | None, product_type:
         return load_mirakl(files)
     if adapter == "shopify_admin":
         return load_shopify(first)
-    if adapter in ("feed_file", "target_plus"):
+    if adapter in ("feed_file", "target_plus", "rithum"):
         if first is None:
             raise SchemaLoadError("Upload the retailer's XLSX template")
         return load_retailer_xlsx(first)

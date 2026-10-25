@@ -20,10 +20,6 @@ env:
     value: "/Volumes/swim_data_whse/pim/packages"
   - name: PIM_STYLE_MASTER_TABLE
     value: "swim_data_whse.bluecherry.style_master"
-  - name: PIM_AI_ENDPOINT_COPY
-    value: "databricks-claude-sonnet-4-5"
-  - name: PIM_AI_ENDPOINT_CLASSIFY
-    value: "databricks-claude-haiku-4-5"
   - name: PIM_AIR_API_KEY
     valueFrom: air-api-key
   - name: PIM_SHOPIFY_READ_TOKEN
@@ -63,6 +59,22 @@ env:
   # AI-07: set to an MLflow experiment path to log evaluation runs there as well (D29).
   - name: PIM_MLFLOW_EXPERIMENT
     value: ""
+  # EXP-08 Walmart Marketplace credentials (GOV-05); the feed is built and validated without them, sent only with
+  # PIM_FEATURE_CHANNEL_SEND=true
+  - name: PIM_WALMART_CLIENT_ID
+    valueFrom: walmart-client-id
+  - name: PIM_WALMART_CLIENT_SECRET
+    valueFrom: walmart-client-secret
+  # D-03: the Shopify write path runs only against this development store until direct writes are approved
+  - name: PIM_SHOPIFY_SANDBOX_DOMAIN
+    value: ""
+  - name: PIM_SHOPIFY_SANDBOX_TOKEN
+    valueFrom: shopify-sandbox-token
+  # EXP-09 email delivery (optional); SFTP passwords or keys are app secret resources named on the channel transport
+  - name: PIM_SMTP_HOST
+    value: ""
+  - name: PIM_SMTP_FROM
+    value: "pim@swimusa.com"
   - name: PIM_FEATURE_IMAGE_AI_MATCH
     # IMG-03 tier 3 (Air semantic search plus vision model) stays off until PLT-00 step 8 passes.
     value: "false"
