@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+# Databricks runs this file directly, so put backend/ on the path before the first `pim` import.
+sys.path.insert(0, str(Path(globals().get("__file__") or sys.argv[0]).resolve().parents[2]))
 
 from pim.jobs._common import mark_job_run  # noqa: E402
 
