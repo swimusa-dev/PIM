@@ -2,7 +2,7 @@
 # level: style | style_color | sku | ref:print | ref:fabric | ref:model
 # source_of_truth: erp | plm | pim | channel. ERP attributes carry erp_column (the Style Master column, IMP-09)
 # and are read-only for every role (P1). Column names below are the ones seen in the Image Relay export and the
-# VAS Product Information Request; confirm them against swim_data_whse.bluecherry.style_master on first ingest.
+# VAS Product Information Request; confirm them against swim_data_whse.image_relay_view.vw_image_relay_export_style_master on first ingest.
 attributes:
   # ---- ERP (read-only) --------------------------------------------------------------------------
   - {code: erp_style_description, label: Style Description (ERP), data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: style_description, owner_role: product_merch}
@@ -23,7 +23,7 @@ attributes:
   - {code: erp_gms_style_no, label: Legacy GMS style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: gms_style_no}
   - {code: erp_vendor_style, label: Vendor style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: vendor_style}
   - {code: erp_standard_cost, label: Standard Cost, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: standard_cost, unit: USD, cost_restricted: true}
-  - {code: erp_retail_msrp, label: Retail MSRP, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: retail_msrp, unit: USD, cost_restricted: true}
+  - {code: erp_retail_msrp, label: Retail MSRP, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: msrp, unit: USD, cost_restricted: true}
 
   # ---- Style Details (PIM-owned) -----------------------------------------------------------------
   - {code: product_name, label: Product name, data_type: text, level: style, group_code: style_details, source_of_truth: pim, status: confirmed, owner_role: product_merch, validation: {max_length: 120}, example_value: Skylar Top}

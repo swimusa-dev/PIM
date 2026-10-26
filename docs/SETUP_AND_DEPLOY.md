@@ -23,7 +23,7 @@ Items marked **confirm** depend on workspace settings that only the Phase 0 spik
 
 Workspace permissions you need: create Databricks Apps, create Lakebase instances, create jobs, create secret
 scopes, `CREATE SCHEMA` and `CREATE VOLUME` on catalog `swim_data_whse`, `CAN USE` on a SQL warehouse, and
-`SELECT` on `swim_data_whse.bluecherry.style_master` (or wherever the Style Master lands).
+`SELECT` on `swim_data_whse.image_relay_view.vw_image_relay_export_style_master` (or wherever the Style Master lands).
 
 ---
 
@@ -86,7 +86,7 @@ CREATE SCHEMA IF NOT EXISTS swim_data_whse.pim;
 CREATE VOLUME IF NOT EXISTS swim_data_whse.pim.imports;
 CREATE VOLUME IF NOT EXISTS swim_data_whse.pim.packages;
 GRANT USE SCHEMA, READ VOLUME, WRITE VOLUME ON SCHEMA swim_data_whse.pim TO `<app service principal>`;   -- after step 5 creates it
-GRANT SELECT ON TABLE swim_data_whse.bluecherry.style_master TO `<app service principal>`;
+GRANT SELECT ON TABLE swim_data_whse.image_relay_view.vw_image_relay_export_style_master TO `<app service principal>`;
 ```
 
 If the Style Master lives at a different table name, change `PIM_STYLE_MASTER_TABLE` in `app.yaml` and the
@@ -190,7 +190,7 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
 
 Column names: `seeds/attributes.yml` maps ERP attributes to Style Master columns through `erp_column`, using
 the names seen in the Image Relay export and the VAS request sheet, normalized to lower snake case. Compare
-them with the real table on the first run (`DESCRIBE swim_data_whse.bluecherry.style_master`) and adjust the
+them with the real table on the first run (`DESCRIBE swim_data_whse.image_relay_view.vw_image_relay_export_style_master`) and adjust the
 `erp_column` values; no code change is needed.
 
 ---

@@ -49,7 +49,7 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ${workspace.file_path}/backend/pim/jobs/run_ingest.py
-            parameters: ["--source", "delta", "--table", "${var.catalog}.bluecherry.style_master",
+            parameters: ["--source", "delta", "--table", "${var.catalog}.image_relay_view.vw_image_relay_export_style_master",
                          "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
                          "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
                          "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
