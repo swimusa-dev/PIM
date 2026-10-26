@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    app = FastAPI(title="Swim USA PIM", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app = FastAPI(title="The Fitting Room PIM", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
 
     @app.middleware("http")
     async def request_log(request: Request, call_next):  # noqa: ANN001
@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         def root() -> dict:
-            return {"app": "Swim USA PIM", "version": __version__, "docs": "/api/docs",
+            return {"app": "The Fitting Room PIM", "version": __version__, "docs": "/api/docs",
                     "note": "Frontend build missing. Run `npm run build` in frontend/."}
     return app
 

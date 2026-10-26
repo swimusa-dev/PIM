@@ -38,7 +38,7 @@ export function AppShell() {
       <aside className="shell-nav">
         <div className="shell-brand">
           <span className="dot" />
-          Swim USA PIM
+          The Fitting Room PIM
         </div>
         <nav>
           {NAV.map((n) => (
@@ -60,7 +60,7 @@ export function AppShell() {
         </div>
       </aside>
       <header className="shell-topbar">
-        <span className="app-name">Swim USA PIM</span>
+        <span className="app-name">The Fitting Room PIM</span>
         <span className="user">
           <NotificationBell />
           {me.isLoading && <span>Signing in</span>}

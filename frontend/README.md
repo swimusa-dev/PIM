@@ -1,4 +1,4 @@
-# Swim USA PIM frontend
+# The Fitting Room PIM frontend
 
 React 18 + TypeScript single-page app for the Swim USA PIM (Product Information Management) Databricks App.
 Swim USA designs, manufactures, wholesales and retails women's fashion swimwear and apparel; the first brand served

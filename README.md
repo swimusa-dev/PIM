@@ -1,4 +1,4 @@
-# Swim USA PIM (Vitamin A first)
+# The Fitting Room PIM (Swim USA's Style Master)
 
 A Product Information Management app for Swim USA, built as a **Databricks App** (FastAPI + React) with
 **Lakebase** (managed Postgres) as the working store and **Delta** as the analytical and history layer.
