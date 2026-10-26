@@ -19,7 +19,7 @@ env:
   - name: PIM_PACKAGE_VOLUME
     value: "/Volumes/swim_data_whse/pim/packages"
   - name: PIM_STYLE_MASTER_TABLE
-    value: "swim_data_whse.gold.vw_style_master_final"
+    value: "swim_data_whse.image_relay_view.vw_image_relay_export_style_master"
   - name: PIM_AIR_API_KEY
     valueFrom: air-api-key
   - name: PIM_SHOPIFY_READ_TOKEN

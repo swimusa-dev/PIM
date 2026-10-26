@@ -120,3 +120,17 @@ def test_readiness_snapshots_exist_after_ingest(session, ingested):
     target = _ent(session, "style_color", "300100", "NVY")
     tsnap = snapshots_for(session, [target.id])[target.id]
     assert tsnap["shopify-vitamina"].eligible is False  # EXP-12: exclusive brand not for our DTC site
+
+
+def test_canonicalize_image_relay_headers():
+    from pim.adapters.bluecherry_source import canonicalize
+
+    row = canonicalize({
+        "Style #": "A1", "Color Cd": "BLK", "Style Master Size": "M", "Style Master UPC": "123",
+        "Season Cd": "S26", "Division Name": "Swim", "Sub Division Name": "Tops", "Color Name": "Black",
+        "MSRP": "88",
+    })
+    assert (row["style_number"], row["color_code"], row["size"], row["upc"]) == ("A1", "BLK", "M", "123")
+    assert (row["season"], row["division"], row["sub_division"], row["color_description"]) == (
+        "S26", "Swim", "Tops", "Black")
+    assert row["msrp"] == "88"
