@@ -115,9 +115,9 @@ resources:
           job:
             id: ${resources.jobs.pim_bootstrap.id}
             permission: CAN_MANAGE_RUN
-      # OBO user authorization scopes (PLT-00 step 2). Enable on the app in the UI as well.
+      # OBO user authorization scopes (PLT-00 step 2). iam.access-control:read and iam.current-user:read are added
+      # by Databricks to every app and are rejected if listed here. Enable on the app in the UI as well.
       user_api_scopes:
         - sql
-        - files.files
-        - serving.serving-endpoints
-        - iam.current-user:read
+        - files
+        - model-serving
