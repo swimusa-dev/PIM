@@ -82,26 +82,28 @@ class CsvStyleMasterSource:
 
 
 class DeltaStyleMasterSource:
-    """Reads the Style Master through Databricks SQL (Statement Execution API via the SDK)."""
+    """Reads the Style Master through Databricks SQL (Statement Execution API via the SDK).
+
+    The Image Relay export view repeats each SKU once per warehouse (3 million rows for 127 thousand SKUs) across
+    166 columns, far past the 25 MB inline result limit. So the source asks only for the columns the ingest uses
+    (`wanted_columns`, set by the ingest from the attribute metadata, plus every key alias), de-duplicates in SQL,
+    and reads the table in hash slices of the style number so each result stays small.
+    """
 
     name = "bluecherry_delta"
+    SLICES = 16
 
     def __init__(self, table: str | None = None, warehouse_id: str | None = None, updated_column: str | None = None) -> None:
         s = get_settings()
         self.table = table or s.style_master_table
         self.warehouse_id = warehouse_id or s.sql_warehouse_id
         self.updated_column = updated_column
+        # Normalized headers (see normalize_header) the ingest reads beyond the key aliases; None means every column.
+        self.wanted_columns: set[str] | None = None
 
-    def read_changes(self, since: datetime | None = None) -> Iterator[dict[str, Any]]:
-        from databricks.sdk import WorkspaceClient
+    def _execute(self, w: Any, sql: str) -> tuple[list[str], Iterator[list[Any]]]:
         from databricks.sdk.service.sql import Disposition, Format, StatementState
 
-        if not self.warehouse_id:
-            raise RuntimeError("PIM_SQL_WAREHOUSE_ID is required for Delta reads")
-        w = WorkspaceClient()
-        sql = f"SELECT * FROM {self.table}"
-        if since and self.updated_column:
-            sql += f" WHERE {self.updated_column} >= '{since.isoformat()}'"
         resp = w.statement_execution.execute_statement(
             statement=sql, warehouse_id=self.warehouse_id, wait_timeout="50s",
             disposition=Disposition.INLINE, format=Format.JSON_ARRAY,
@@ -111,10 +113,49 @@ class DeltaStyleMasterSource:
         if resp.status and resp.status.state != StatementState.SUCCEEDED:
             raise RuntimeError(f"Style Master query failed: {resp.status.error}")
         cols = [c.name for c in resp.manifest.schema.columns]
-        chunk = resp.result
-        while chunk is not None:
-            for arr in chunk.data_array or []:
+
+        def rows() -> Iterator[list[Any]]:
+            chunk = resp.result
+            while chunk is not None:
+                yield from chunk.data_array or []
+                if chunk.next_chunk_index is None:
+                    break
+                chunk = w.statement_execution.get_statement_result_chunk_n(resp.statement_id, chunk.next_chunk_index)
+
+        return cols, rows()
+
+    def _select_columns(self, w: Any) -> list[str]:
+        _, described = self._execute(w, f"DESCRIBE TABLE {self.table}")
+        names: list[str] = []
+        for row in described:
+            name = (row[0] or "").strip()
+            if not name or name.startswith("#"):
+                break  # DESCRIBE lists partition and detail sections after a blank or "#" row
+            names.append(name)
+        if self.wanted_columns is None:
+            return names
+        wanted = {a for aliases in KEY_ALIASES.values() for a in aliases} | self.wanted_columns
+        return [n for n in names if normalize_header(n) in wanted]
+
+    def read_changes(self, since: datetime | None = None) -> Iterator[dict[str, Any]]:
+        from databricks.sdk import WorkspaceClient
+
+        if not self.warehouse_id:
+            raise RuntimeError("PIM_SQL_WAREHOUSE_ID is required for Delta reads")
+        w = WorkspaceClient()
+        columns = self._select_columns(w)
+        select = ", ".join(f"`{c}`" for c in columns)
+        where = []
+        if since and self.updated_column:
+            where.append(f"`{self.updated_column}` >= '{since.isoformat()}'")
+        by_header = {normalize_header(c): c for c in columns}
+        style_col = next((by_header[a] for a in KEY_ALIASES["style_number"] if a in by_header), None)
+        slices = range(self.SLICES) if style_col else [None]
+        for k in slices:
+            conds = list(where)
+            if k is not None:
+                conds.append(f"pmod(xxhash64(`{style_col}`), {self.SLICES}) = {k}")
+            sql = f"SELECT DISTINCT {select} FROM {self.table}" + (f" WHERE {' AND '.join(conds)}" if conds else "")
+            cols, rows = self._execute(w, sql)
+            for arr in rows:
                 yield canonicalize(dict(zip(cols, arr, strict=False)))
-            if chunk.next_chunk_index is None:
-                break
-            chunk = w.statement_execution.get_statement_result_chunk_n(resp.statement_id, chunk.next_chunk_index)
