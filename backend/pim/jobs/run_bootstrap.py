@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -14,8 +13,14 @@ from pim.jobs._common import mark_job_run  # noqa: E402
 
 
 def main() -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    # In-process on purpose: the Databricks SDK's runtime auth (Lakebase tokens) does not exist in a subprocess.
     root = Path(_common.__file__).resolve().parents[3]
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=root, check=True)
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "migrations"))
+    command.upgrade(cfg, "head")
     from pim.db.seed import seed_all
     from pim.db.session import session_scope
 
