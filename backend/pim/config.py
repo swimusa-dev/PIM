@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # --- Databricks platform ----------------------------------------------------------------
     sql_warehouse_id: str | None = None
-    style_master_table: str = "swim_data_whse.bluecherry.style_master"
+    style_master_table: str = "swim_data_whse.gold.vw_style_master_final"
     import_volume: str = "./local_data/imports"
     package_volume: str = "./local_data/packages"
     publish_volume: str | None = None  # EXP-05 payloads and renditions; defaults to package_volume
