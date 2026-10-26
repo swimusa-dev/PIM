@@ -179,12 +179,21 @@ def _start_launch_workflow(session: Session, ent: ProductEntity, stats: _Stats, 
         stats.workflows += 1
 
 
+def _columns_read(meta: Metadata) -> set[str]:
+    """Style Master columns the ingest reads besides the key aliases, so a wide source can be narrowed."""
+    cols = {a.erp_column for a in meta.attributes.values() if a.erp_column and a.status != "deprecated"}
+    cols |= {(f.erp_match or {}).get("field") for f in meta.families.values() if (f.erp_match or {}).get("field")}
+    return cols
+
+
 def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",
                             since: datetime | None = None, rows: Iterable[dict] | None = None) -> IngestRun:
     run = IngestRun(source=getattr(source, "name", "bluecherry"), status="running")
     session.add(run)
     session.flush()
     meta = load_metadata(session, force=True)
+    if hasattr(source, "wanted_columns"):
+        source.wanted_columns = _columns_read(meta)
     stats = _Stats()
     now = utcnow()
     change_set = new_change_set(session, "ingest", requested_by, "Style Master ingest", source_ref=run.id)
