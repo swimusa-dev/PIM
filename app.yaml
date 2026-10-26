@@ -11,7 +11,10 @@ env:
     # "table" uses the in-app user_role table keyed by X-Forwarded-Email (fallback).
     value: "table"
   - name: PIM_LAKEBASE_INSTANCE
-    valueFrom: lakebase
+    # The instance NAME, used to request database credentials. Not `valueFrom: lakebase`: for a database resource
+    # that resolves to the host address, and the credential call then fails with "Database instance ... not found".
+    # Keep in step with the lakebase_instance variable in databricks.yml.
+    value: "pim-lakebase"
   - name: PIM_SQL_WAREHOUSE_ID
     valueFrom: sql-warehouse
   - name: PIM_IMPORT_VOLUME
