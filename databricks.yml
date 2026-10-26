@@ -18,6 +18,7 @@ variables:
     default: pim-lakebase
   sql_warehouse_id:
     description: SQL warehouse used for Delta reads (Style Master ingest, history publish)
+    default: 02726a0a46ad773a
   secret_scope:
     description: Secret scope holding adapter credentials (GOV-05)
     default: pim-secrets
@@ -40,11 +41,11 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://adb-REPLACE-ME.azuredatabricks.net
+      host: https://adb-4067540067618844.4.azuredatabricks.net
   prod:
     mode: production
     workspace:
-      host: https://adb-REPLACE-ME.azuredatabricks.net
+      host: https://adb-4067540067618844.4.azuredatabricks.net
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     run_as:
       service_principal_name: REPLACE-WITH-SP-APPLICATION-ID
