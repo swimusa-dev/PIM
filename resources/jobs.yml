@@ -5,6 +5,7 @@
 variables:
   lakebase_host:
     description: Lakebase instance DNS host (Compute > Lakebase Postgres > instance > Connection details)
+    default: ep-fragrant-mountain-e9ostkq5.database.eastus.azuredatabricks.net
   lakebase_user:
     description: Postgres role used by jobs. Your user email in dev; the service principal application id in prod.
   lakebase_database:

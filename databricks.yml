@@ -42,6 +42,8 @@ targets:
     default: true
     workspace:
       host: https://adb-4067540067618844.4.azuredatabricks.net
+    variables:
+      lakebase_user: david-admin@swimusa.com
   prod:
     mode: production
     workspace:
