@@ -199,6 +199,14 @@ code,
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+.page-header.hero h1 {
+  margin: 0;
+}
+.hero-subtitle {
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 2px;
+}
 .page-header .actions {
   display: flex;
   gap: 8px;

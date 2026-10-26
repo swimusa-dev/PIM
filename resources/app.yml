@@ -2,8 +2,8 @@
 resources:
   apps:
     pim_app:
-      name: swimusa-pim
-      description: "Swim USA PIM (Vitamin A first): product information management as a Databricks App"
+      name: the-fitting-room-pim
+      description: "The Fitting Room PIM, Swim USA's Style Master: product information management as a Databricks App"
       source_code_path: ../
       # compute_size is UNCONFIRMED on the compliance-profile workspace; PLT-00 step 1 records the answer.
       # Uncomment once confirmed:

@@ -17,9 +17,12 @@ export function HomePage() {
 
   return (
     <div className="stack gap16">
-      <div className="page-header">
-        <h1>Home</h1>
-        <span className="muted">Vitamin A catalog status</span>
+      <div className="page-header hero">
+        <div>
+          <h1>The Fitting Room PIM</h1>
+          <div className="hero-subtitle">{"Swim USA's Style Master"}</div>
+          <div className="muted">Built for every brand</div>
+        </div>
       </div>
 
       <div className="cards">
