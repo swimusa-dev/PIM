@@ -107,7 +107,7 @@ the adapters raise a clear "not configured" error until a real value is present.
 ### 3.5 On-behalf-of-user authorization (RBAC-01, PLT-00 step 2) **confirm**
 
 In the account console, confirm that user authorization for apps is enabled and that the admin scope allowlist
-includes `sql`, `files.files`, `serving.serving-endpoints`, and `iam.current-user:read` (names as listed under
+includes `sql`, `files`, and `model-serving` (names as listed under
 `user_api_scopes` in `resources/app.yml`). If the workspace does not allow OBO, set `PIM_ROLE_SOURCE=table`
 (the default in `app.yaml`) and manage roles in Admin > User roles.
 
@@ -200,7 +200,7 @@ them with the real table on the first run (`DESCRIBE swim_data_whse.image_relay_
 - **Table mode (default):** Admin > User roles. Add each user's email with one or more roles and, optionally,
   brand scopes (empty means all brands). `seeds/roles.yml` pre-assigns `dchristy@swimusa.com` as PIM Admin.
 - **Group mode:** set `PIM_ROLE_SOURCE=groups` and `PIM_GROUP_ROLE_MAP="pim-admins=pim_admin;ecomm-team=ecommerce"`
-  in `app.yaml`. Requires OBO with the `iam.current-user:read` scope so the app can read the user's groups.
+  in `app.yaml`. Requires OBO; Databricks adds the `iam.current-user:read` scope to every app by default, so the app can read the user's groups.
   Table assignments still apply on top.
 
 ERP attributes are view-only for everyone, and cost attributes are hidden unless the role has `view_cost`
