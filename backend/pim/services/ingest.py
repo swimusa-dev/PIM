@@ -7,12 +7,14 @@ Never deletes: discontinued products are flagged. Never writes back to BlueCherr
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from pim.adapters.base import SourceAdapter
@@ -122,8 +124,14 @@ def _add_alias(session: Session, seen: set[tuple[str, str]], ent: ProductEntity,
 
 
 def _write_erp_attributes(session: Session, meta: Metadata, ent: ProductEntity, row: dict, stats: _Stats,
-                          change_set, now: datetime) -> None:
-    """Map Style Master columns to ERP-owned attributes through AttributeDefinition.erp_column (IMP-09/10/11)."""
+                          change_set, now: datetime,
+                          erp_last: dict[tuple[str, str], tuple[Any, int]] | None = None) -> None:
+    """Map Style Master columns to ERP-owned attributes through AttributeDefinition.erp_column (IMP-09/10/11).
+
+    A style repeats on each of its color and size rows and a color on each size row, usually with the same values.
+    `erp_last` remembers the raw value last written per entity and attribute: the same value again cannot change a
+    stored value, its history or its defect, so only the counters are replayed and the two database lookups are
+    skipped. A different value, including a return to an earlier one, is written as before (last row wins)."""
     for attr in meta.attributes.values():
         if not attr.erp_column or attr.level != ent.level or attr.status == "deprecated":
             continue
@@ -135,6 +143,11 @@ def _write_erp_attributes(session: Session, meta: Metadata, ent: ProductEntity, 
         if norm.was_placeholder:
             stats.placeholders += 1
             stats.placeholders_by_column[attr.erp_column] = stats.placeholders_by_column.get(attr.erp_column, 0) + 1
+        key = (ent.id, attr.code)
+        if erp_last is not None and key in erp_last and erp_last[key][0] == raw:
+            stats.defects += erp_last[key][1]
+            continue
+        defects_before = stats.defects
         value: Any = NA_SENTINEL if norm.not_applicable else norm.value
         raw_keep: str | None = None
         if value is not None and value != NA_SENTINEL and attr.data_type == "single_select" and attr.option_list_code:
@@ -154,6 +167,8 @@ def _write_erp_attributes(session: Session, meta: Metadata, ent: ProductEntity, 
                 stats.defects += 1
         set_value(session, meta, None, ent, attr, value, source_type="erp", source_ref=attr.erp_column,
                   change_set=change_set, raw_value=raw_keep, force=True)
+        if erp_last is not None:
+            erp_last[key] = (raw, stats.defects - defects_before)
 
 
 def _record_defect(session: Session, ent: ProductEntity, attr_code: str, column: str | None, raw: str,
@@ -186,146 +201,214 @@ def _columns_read(meta: Metadata) -> set[str]:
     return cols
 
 
-def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",
-                            since: datetime | None = None, rows: Iterable[dict] | None = None) -> IngestRun:
-    run = IngestRun(source=getattr(source, "name", "bluecherry"), status="running")
-    session.add(run)
-    session.flush()
-    meta = load_metadata(session, force=True)
-    if hasattr(source, "wanted_columns"):
-        source.wanted_columns = _columns_read(meta)
-    stats = _Stats()
-    now = utcnow()
-    change_set = new_change_set(session, "ingest", requested_by, "Style Master ingest", source_ref=run.id)
+def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: Iterable[dict], stats: _Stats,
+                 now: datetime) -> None:
+    """Load one chunk of Style Master rows: entities, aliases and ERP values, then the lifecycle roll-up, launch
+    workflows and readiness for what the chunk touched. The caller commits. A style's rows all fall in one chunk
+    (the Delta source slices by style number), so the per-style roll-up below is complete within a chunk."""
     cache: dict[tuple, ProductEntity] = {}
     alias_seen: set[tuple[str, str]] = set()
     seen_entity_ids: set[str] = set()
     touched_style_colors: dict[str, ProductEntity] = {}
     new_style_colors: list[ProductEntity] = []
-    style_live: dict[str, bool] = {}  # style id -> at least one non-discontinued row seen this load
-    try:
-        for row in rows if rows is not None else source.read_changes(since):
-            stats.rows += 1
-            style = _s(row.get("style_number"))
-            if not style:
-                continue
-            style = normalize_identifier(style) if "-" in style or " " in style else style.strip()
-            color = _s(row.get("color_code"))
-            size = _s(row.get("size"))
-            sku = _s(row.get("sku"))
-            upc = _s(row.get("upc"))
-            erp_fields = {k: row.get(k) for k in ("division", "sub_division", "brand_name", "brand_classification",
-                                                  "product_type", "season", "style_status") if k in row}
-            scopes = evaluate_brand_scopes(erp_fields, meta.brand_scopes)
-            family = _family_for(meta, row)
-            cls_raw = _s(row.get("brand_classification"))
-            cls_code = None
-            if cls_raw:
-                cls_code = map_raw_to_option(cls_raw, meta.value_mappings.get(("erp", "brand_classification"), {}),
-                                             meta.option_codes("brand_classification")).option_code
-            discontinued = _is_truthy(row.get("discontinued")) or "DISC" in str(row.get("style_status") or "").upper()
-            is_prepack = bool(_s(row.get("pack_type"))) or (size is None and color and sku and any(
-                t in (sku or "").upper() for t in ("AST", "PPK", "PREPACK")))
+    style_live: dict[str, bool] = {}  # style id -> at least one non-discontinued row seen this chunk
+    # (entity id, attribute code) -> (raw value, defects it raised) of the last ERP write in this chunk
+    erp_last: dict[tuple[str, str], tuple[Any, int]] = {}
 
-            # Style
-            st, st_new = _upsert_entity(session, cache, "style", style, None, None, None, stats, now,
-                                        family_code=family, brand_scopes=scopes, erp_fields=erp_fields,
-                                        brand_classification=cls_code,
-                                        label=_s(row.get("style_description")) or style)
-            seen_entity_ids.add(st.id)
-            _add_alias(session, alias_seen, st, style, "style")
-            _add_alias(session, alias_seen, st, row.get("gms_style_no"), "gms")
-            _add_alias(session, alias_seen, st, row.get("vendor_style"), "vendor")
-            if st_new or st.lifecycle_status == "new":
-                _write_erp_attributes(session, meta, st, row, stats, change_set, now)
-            else:
-                _write_erp_attributes(session, meta, st, row, stats, change_set, now)
-            style_live[st.id] = style_live.get(st.id, False) or not discontinued
-            if not color:
-                continue
-            # Style-color
-            label = f"{st.label} {_s(row.get('color_description')) or color}".strip()
-            sc, sc_new = _upsert_entity(session, cache, "style_color", style, color, None, st, stats, now,
-                                        family_code=family, brand_scopes=scopes, erp_fields=erp_fields,
-                                        brand_classification=cls_code, label=label,
-                                        entity_type="product")
-            seen_entity_ids.add(sc.id)
-            _add_alias(session, alias_seen, sc, f"{style}-{color}", "style_color")
-            _add_alias(session, alias_seen, sc, row.get("parent_sku"), "style_color")
-            _write_erp_attributes(session, meta, sc, row, stats, change_set, now)
+    for row in row_iter:
+        stats.rows += 1
+        style = _s(row.get("style_number"))
+        if not style:
+            continue
+        style = normalize_identifier(style) if "-" in style or " " in style else style.strip()
+        color = _s(row.get("color_code"))
+        size = _s(row.get("size"))
+        sku = _s(row.get("sku"))
+        upc = _s(row.get("upc"))
+        erp_fields = {k: row.get(k) for k in ("division", "sub_division", "brand_name", "brand_classification",
+                                              "product_type", "season", "style_status") if k in row}
+        scopes = evaluate_brand_scopes(erp_fields, meta.brand_scopes)
+        family = _family_for(meta, row)
+        cls_raw = _s(row.get("brand_classification"))
+        cls_code = None
+        if cls_raw:
+            cls_code = map_raw_to_option(cls_raw, meta.value_mappings.get(("erp", "brand_classification"), {}),
+                                         meta.option_codes("brand_classification")).option_code
+        discontinued = _is_truthy(row.get("discontinued")) or "DISC" in str(row.get("style_status") or "").upper()
+        is_prepack = bool(_s(row.get("pack_type"))) or (size is None and color and sku and any(
+            t in (sku or "").upper() for t in ("AST", "PPK", "PREPACK")))
+
+        # Style
+        st, st_new = _upsert_entity(session, cache, "style", style, None, None, None, stats, now,
+                                    family_code=family, brand_scopes=scopes, erp_fields=erp_fields,
+                                    brand_classification=cls_code,
+                                    label=_s(row.get("style_description")) or style)
+        seen_entity_ids.add(st.id)
+        _add_alias(session, alias_seen, st, style, "style")
+        _add_alias(session, alias_seen, st, row.get("gms_style_no"), "gms")
+        _add_alias(session, alias_seen, st, row.get("vendor_style"), "vendor")
+        _write_erp_attributes(session, meta, st, row, stats, change_set, now, erp_last)
+        style_live[st.id] = style_live.get(st.id, False) or not discontinued
+        if not color:
+            continue
+        # Style-color
+        label = f"{st.label} {_s(row.get('color_description')) or color}".strip()
+        sc, sc_new = _upsert_entity(session, cache, "style_color", style, color, None, st, stats, now,
+                                    family_code=family, brand_scopes=scopes, erp_fields=erp_fields,
+                                    brand_classification=cls_code, label=label,
+                                    entity_type="product")
+        seen_entity_ids.add(sc.id)
+        _add_alias(session, alias_seen, sc, f"{style}-{color}", "style_color")
+        _add_alias(session, alias_seen, sc, row.get("parent_sku"), "style_color")
+        _write_erp_attributes(session, meta, sc, row, stats, change_set, now, erp_last)
+        if discontinued:
+            sc.lifecycle_status = "discontinued"
+            stats.discontinued += 1
+        elif sc_new:
+            new_style_colors.append(sc)
+        elif sc.lifecycle_status == "discontinued":
+            sc.lifecycle_status = "active"  # reactivated in the ERP
+        touched_style_colors[sc.id] = sc
+        # SKU (a style-color may have no sizes yet, F8)
+        if size or is_prepack:
+            sku_label = f"{label} {size or ''}".strip()
+            sk, _ = _upsert_entity(session, cache, "sku", style, color, size, sc, stats, now,
+                                   sku=sku or (f"{style}-{color}-{size}" if size else None), upc=upc,
+                                   family_code=family, brand_scopes=scopes, label=sku_label,
+                                   entity_type="prepack" if is_prepack else "product")
+            seen_entity_ids.add(sk.id)
+            if is_prepack:
+                sc.entity_type = "prepack" if size is None else sc.entity_type
+                comps = _s(row.get("pack_components"))
+                if comps:
+                    for comp in comps.split(","):
+                        comp_norm = normalize_identifier(comp)
+                        tgt = session.execute(select(IdentifierAlias).where(
+                            IdentifierAlias.alias_type == "sku", IdentifierAlias.normalized == comp_norm)).scalar_one_or_none()
+                        if tgt and not session.get(PrepackComponent, {"prepack_id": sk.id, "sku_id": tgt.entity_id}):
+                            session.add(PrepackComponent(prepack_id=sk.id, sku_id=tgt.entity_id))
+            _add_alias(session, alias_seen, sk, sk.sku, "sku")
+            _add_alias(session, alias_seen, sk, upc, "upc")
+            if size:
+                entry = meta.size_scale_entry(size)
+                sk.size_unmapped = entry is None
+                if entry is None:
+                    stats.unmapped_sizes += 1
+                    _record_defect(session, sk, "size", "size", size, "not_in_scale", now)
+            _write_erp_attributes(session, meta, sk, row, stats, change_set, now, erp_last)
             if discontinued:
-                sc.lifecycle_status = "discontinued"
-                stats.discontinued += 1
-            elif sc_new:
-                new_style_colors.append(sc)
-            elif sc.lifecycle_status == "discontinued":
-                sc.lifecycle_status = "active"  # reactivated in the ERP
-            touched_style_colors[sc.id] = sc
-            # SKU (a style-color may have no sizes yet, F8)
-            if size or is_prepack:
-                sku_label = f"{label} {size or ''}".strip()
-                sk, _ = _upsert_entity(session, cache, "sku", style, color, size, sc, stats, now,
-                                       sku=sku or (f"{style}-{color}-{size}" if size else None), upc=upc,
-                                       family_code=family, brand_scopes=scopes, label=sku_label,
-                                       entity_type="prepack" if is_prepack else "product")
-                seen_entity_ids.add(sk.id)
-                if is_prepack:
-                    sc.entity_type = "prepack" if size is None else sc.entity_type
-                    comps = _s(row.get("pack_components"))
-                    if comps:
-                        for comp in comps.split(","):
-                            comp_norm = normalize_identifier(comp)
-                            tgt = session.execute(select(IdentifierAlias).where(
-                                IdentifierAlias.alias_type == "sku", IdentifierAlias.normalized == comp_norm)).scalar_one_or_none()
-                            if tgt and not session.get(PrepackComponent, {"prepack_id": sk.id, "sku_id": tgt.entity_id}):
-                                session.add(PrepackComponent(prepack_id=sk.id, sku_id=tgt.entity_id))
-                _add_alias(session, alias_seen, sk, sk.sku, "sku")
-                _add_alias(session, alias_seen, sk, upc, "upc")
-                if size:
-                    entry = meta.size_scale_entry(size)
-                    sk.size_unmapped = entry is None
-                    if entry is None:
-                        stats.unmapped_sizes += 1
-                        _record_defect(session, sk, "size", "size", size, "not_in_scale", now)
-                _write_erp_attributes(session, meta, sk, row, stats, change_set, now)
-                if discontinued:
-                    sk.lifecycle_status = "discontinued"
-                elif sk.lifecycle_status == "discontinued":
-                    sk.lifecycle_status = "active"
-            if stats.rows % 500 == 0:
-                session.flush()
-                log.info("ingest: %s rows", stats.rows)
-        # A style is discontinued only when every row seen for it this load is discontinued (never because one
-        # old color is); a style with any live color stays, or becomes, active.
-        styles_by_id = {e.id: e for e in cache.values() if e.level == "style"}
-        for st_id, live in style_live.items():
-            st = styles_by_id.get(st_id)
-            if st is None:
+                sk.lifecycle_status = "discontinued"
+            elif sk.lifecycle_status == "discontinued":
+                sk.lifecycle_status = "active"
+        if stats.rows % 500 == 0:
+            session.flush()
+            log.info("ingest: %s rows", stats.rows)
+    # A style is discontinued only when every row seen for it this load is discontinued (never because one
+    # old color is); a style with any live color stays, or becomes, active.
+    styles_by_id = {e.id: e for e in cache.values() if e.level == "style"}
+    for st_id, live in style_live.items():
+        st = styles_by_id.get(st_id)
+        if st is None:
+            continue
+        if not live:
+            st.lifecycle_status = "discontinued"
+        elif st.lifecycle_status == "discontinued":
+            st.lifecycle_status = "active"
+    # Promote "new" to "active" once ERP attributes exist, start launch workflows for new style-colors
+    for sc in new_style_colors:
+        _start_launch_workflow(session, sc, stats, now)
+    for ent in cache.values():
+        if ent.lifecycle_status == "new" and ent.id not in {e.id for e in new_style_colors}:
+            ent.lifecycle_status = "active"
+    session.flush()
+    refresh_snapshots(session, meta, list(touched_style_colors.values()))
+
+
+SLICE_ATTEMPTS = 3
+RESUME_WINDOW = timedelta(hours=48)
+
+
+def _resumable_slices(session: Session, source_name: str, total: int) -> tuple[set[int], str | None]:
+    """Slices a previous failed load already committed, so a re-run continues instead of starting over. Only the
+    latest run counts, only when it failed (never after a later success) and only within RESUME_WINDOW."""
+    prev = session.execute(select(IngestRun).where(IngestRun.source == source_name)
+                           .order_by(IngestRun.started_at.desc()).limit(1)).scalar_one_or_none()
+    if prev is None or prev.status != "failed" or utcnow() - prev.started_at > RESUME_WINDOW:
+        return set(), None
+    report = prev.report or {}
+    if report.get("slices_total") != total:
+        return set(), None
+    return {int(i) for i in report.get("completed_slices", [])}, prev.id
+
+
+def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",
+                            since: datetime | None = None, rows: Iterable[dict] | None = None,
+                            resume: bool = True) -> IngestRun:
+    """Load the Style Master. A source that offers `slice_ids()` and `read_slice(id, since)` (the Delta source) is
+    loaded one slice at a time: each slice commits, is retried if the database connection drops, and is recorded in
+    the run report so a failed load resumes where it stopped. Any other source loads as a single chunk."""
+    sliced = rows is None and hasattr(source, "slice_ids")
+    if hasattr(source, "wanted_columns"):
+        source.wanted_columns = _columns_read(load_metadata(session, force=True))
+    slice_ids: list[int | None] = list(source.slice_ids()) if sliced else [None]
+    done, resumed_from = _resumable_slices(session, getattr(source, "name", "bluecherry"), len(slice_ids)) \
+        if sliced and resume else (set(), None)
+    completed: list[int] = sorted(done)
+
+    def report() -> dict:
+        return {"slices_total": len(slice_ids) if sliced else 0, "completed_slices": list(completed),
+                "resumed_from": resumed_from}
+
+    run = IngestRun(source=getattr(source, "name", "bluecherry"), status="running", report=report())
+    session.add(run)
+    session.flush()
+    change_set = new_change_set(session, "ingest", requested_by, "Style Master ingest", source_ref=run.id)
+    session.commit()  # the run row and its change set outlive a later rollback, so a failure can be recorded on it
+    stats = _Stats()
+    now = utcnow()
+    try:
+        for sid in slice_ids:
+            if sid in done:
+                log.info("ingest: slice %s already loaded by run %s, skipped", sid, resumed_from)
                 continue
-            if not live:
-                st.lifecycle_status = "discontinued"
-            elif st.lifecycle_status == "discontinued":
-                st.lifecycle_status = "active"
-        # Promote "new" to "active" once ERP attributes exist, start launch workflows for new style-colors
-        for sc in new_style_colors:
-            _start_launch_workflow(session, sc, stats, now)
-        for ent in cache.values():
-            if ent.lifecycle_status == "new" and ent.id not in {e.id for e in new_style_colors}:
-                ent.lifecycle_status = "active"
-        session.flush()
-        refresh_snapshots(session, meta, list(touched_style_colors.values()))
+            for attempt in range(1, SLICE_ATTEMPTS + 1):
+                before = copy.deepcopy(stats)
+                try:
+                    meta = load_metadata(session, force=True)
+                    if sid is not None and sliced:
+                        chunk = source.read_slice(sid, since)
+                    else:
+                        chunk = rows if rows is not None else source.read_changes(since)
+                    _ingest_rows(session, meta, change_set, chunk, stats, now)
+                    if sliced:
+                        completed.append(sid)
+                        run.report = report()
+                    session.commit()
+                    break
+                except OperationalError as exc:
+                    # The database dropped the connection mid-slice: nothing from the slice was committed, so
+                    # roll back, reconnect (the pool hands out a fresh connection) and read the slice again.
+                    session.rollback()
+                    stats = before
+                    if not sliced or attempt == SLICE_ATTEMPTS:
+                        raise
+                    log.warning("ingest: slice %s hit a database error (attempt %s of %s), retrying: %s",
+                                sid, attempt, SLICE_ATTEMPTS, str(exc)[:200])
+            if sliced:
+                log.info("ingest: slice %s of %s committed (%s rows so far)", len(completed), len(slice_ids), stats.rows)
         run.status = "succeeded"
         _finalize_run(run, stats, change_set.id)
-        session.flush()
+        run.report = {**run.report, **report()}
+        session.commit()
     except Exception as exc:  # noqa: BLE001
         log.exception("ingest failed")
-        # The transaction is rolled back (nothing partial is kept), then the failure itself is recorded in a
-        # fresh transaction so the run does not stay "running" forever (GOV-04).
-        started = run.started_at
+        # Slices already committed stay (and are listed in the report for a resume); the slice in flight is rolled
+        # back. The failure is recorded on the run row so it does not stay "running" forever (GOV-04).
         session.rollback()
-        failed = IngestRun(source=run.source, status="failed", started_at=started, error=str(exc)[:2000])
-        _finalize_run(failed, stats, None)
-        session.add(failed)
+        run.status = "failed"
+        run.error = str(exc)[:2000]
+        _finalize_run(run, stats, None)
+        run.report = {**run.report, **report()}
         session.commit()
         raise
     return run

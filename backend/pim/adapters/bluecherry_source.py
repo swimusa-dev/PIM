@@ -100,6 +100,9 @@ class DeltaStyleMasterSource:
         self.updated_column = updated_column
         # Normalized headers (see normalize_header) the ingest reads beyond the key aliases; None means every column.
         self.wanted_columns: set[str] | None = None
+        self._w: Any = None
+        self._columns: list[str] | None = None
+        self._style_col: str | None = None
 
     def _execute(self, w: Any, sql: str) -> tuple[list[str], Iterator[list[Any]]]:
         from databricks.sdk.service.sql import Disposition, Format, StatementState
@@ -137,25 +140,43 @@ class DeltaStyleMasterSource:
         wanted = {a for aliases in KEY_ALIASES.values() for a in aliases} | self.wanted_columns
         return [n for n in names if normalize_header(n) in wanted]
 
-    def read_changes(self, since: datetime | None = None) -> Iterator[dict[str, Any]]:
+    def _plan(self, w: Any) -> tuple[list[str], str | None]:
+        """The columns to select and the style column the slices hash (None: the table has no recognizable one)."""
+        if self._columns is None:
+            self._columns = self._select_columns(w)
+            by_header = {normalize_header(c): c for c in self._columns}
+            self._style_col = next((by_header[a] for a in KEY_ALIASES["style_number"] if a in by_header), None)
+        return self._columns, self._style_col
+
+    def _client(self) -> Any:
         from databricks.sdk import WorkspaceClient
 
         if not self.warehouse_id:
             raise RuntimeError("PIM_SQL_WAREHOUSE_ID is required for Delta reads")
-        w = WorkspaceClient()
-        columns = self._select_columns(w)
+        if self._w is None:
+            self._w = WorkspaceClient()
+        return self._w
+
+    def slice_ids(self) -> list[int]:
+        """Slice numbers for read_slice. A table with no style column cannot be sliced and is one slice."""
+        _, style_col = self._plan(self._client())
+        return list(range(self.SLICES)) if style_col else [0]
+
+    def read_slice(self, k: int, since: datetime | None = None) -> Iterator[dict[str, Any]]:
+        """Rows whose style number hashes to slice k, narrowed to the needed columns and de-duplicated in SQL."""
+        w = self._client()
+        columns, style_col = self._plan(w)
         select = ", ".join(f"`{c}`" for c in columns)
-        where = []
+        conds = []
         if since and self.updated_column:
-            where.append(f"`{self.updated_column}` >= '{since.isoformat()}'")
-        by_header = {normalize_header(c): c for c in columns}
-        style_col = next((by_header[a] for a in KEY_ALIASES["style_number"] if a in by_header), None)
-        slices = range(self.SLICES) if style_col else [None]
-        for k in slices:
-            conds = list(where)
-            if k is not None:
-                conds.append(f"pmod(xxhash64(`{style_col}`), {self.SLICES}) = {k}")
-            sql = f"SELECT DISTINCT {select} FROM {self.table}" + (f" WHERE {' AND '.join(conds)}" if conds else "")
-            cols, rows = self._execute(w, sql)
-            for arr in rows:
-                yield canonicalize(dict(zip(cols, arr, strict=False)))
+            conds.append(f"`{self.updated_column}` >= '{since.isoformat()}'")
+        if style_col:
+            conds.append(f"pmod(xxhash64(`{style_col}`), {self.SLICES}) = {int(k)}")
+        sql = f"SELECT DISTINCT {select} FROM {self.table}" + (f" WHERE {' AND '.join(conds)}" if conds else "")
+        cols, rows = self._execute(w, sql)
+        for arr in rows:
+            yield canonicalize(dict(zip(cols, arr, strict=False)))
+
+    def read_changes(self, since: datetime | None = None) -> Iterator[dict[str, Any]]:
+        for k in self.slice_ids():
+            yield from self.read_slice(k, since)
