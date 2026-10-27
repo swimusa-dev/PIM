@@ -183,6 +183,9 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    **Admin > Telemetry > Run ingest now**. The run creates styles, style-colors, and SKUs, maps ERP option
    values, removes placeholder tokens (IMP-10), records ERP defects (IMP-11), starts the launch workflow for new
    style-colors, and computes channel readiness.
+   The load reads the source in 16 slices and commits after each one, so a failure keeps the slices already loaded.
+   Re-running the job resumes from the failed run (within 48 hours); add the `--fresh` job parameter to load
+   everything again. The first load of the Image Relay view (about 207,000 rows) takes a few hours.
 3. Check **Admin > ERP defects**. Unmapped ERP values appear here; add value mappings in
    `seeds/value_mappings.yml` (then re-run bootstrap) or in Admin > Option lists, and re-run the ingest.
 4. Unpause the ingest schedule in the job's UI (every 2 hours by default) once the load is correct. The app header
