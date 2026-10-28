@@ -188,6 +188,8 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    everything again. The first load of the Image Relay view (about 207,000 rows) takes a few hours.
 3. Check **Admin > ERP defects**. Unmapped ERP values appear here; add value mappings in
    `seeds/value_mappings.yml` (then re-run bootstrap) or in Admin > Option lists, and re-run the ingest.
+   Size values are the exception: after adding a value to a size scale in `seeds/option_lists.yml`, re-running
+   bootstrap alone clears the matching SKUs' size flags and defects. No ingest re-run is needed.
 4. Unpause the ingest schedule in the job's UI (every 2 hours by default) once the load is correct. The app header
    shows the last successful load and warns when it is older than `PIM_ERP_STALE_THRESHOLD_HOURS` (26).
 

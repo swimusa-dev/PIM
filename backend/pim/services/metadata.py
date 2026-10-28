@@ -98,13 +98,21 @@ class Metadata:
         """DM-14: find the scale entry for a Style Master size value."""
         if not size:
             return None
+        key = SIZE_ALIASES.get(size.strip().upper(), size.strip().upper())
         for lst in self.option_lists.values():
             if lst.kind != "size_scale":
                 continue
             for v in lst.values:
-                if v.code.upper() == size.upper():
+                if v.code.upper() == key:
                     return lst, v
         return None
+
+
+# Style Master spellings of a size that is the same size under another code (a scale value of its own would
+# duplicate the channel mappings): the abbreviated alphas and the two "no size" markers.
+SIZE_ALIASES = {"LG": "L", "SM": "S", "MD": "M", "NOSIZ": "OS", "NS": "OS"}
+# A pack, not a size: the SKU is a prepack and has no size to check against a scale.
+PREPACK_SIZES = {"PP"}
 
 
 _cache: Metadata | None = None
