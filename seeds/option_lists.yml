@@ -119,6 +119,7 @@ size_scales:
       - {code: L, label: L, sort_order: 50, channel_mappings: {walmart-mp: L, targetplus: L, nordstrom: L}}
       - {code: XL, label: XL, sort_order: 60, channel_mappings: {walmart-mp: XL, targetplus: XL, nordstrom: XL}}
       - {code: XXL, label: XXL, sort_order: 70, channel_mappings: {walmart-mp: XXL, targetplus: XXL, nordstrom: XXL}}
+      - {code: XXXL, label: XXXL, sort_order: 80, channel_mappings: {walmart-mp: XXXL, targetplus: XXXL, nordstrom: XXXL}}
   - code: size_combined_alpha
     label: Combined alpha sizes (Vitamin A)
     size_group: missy
@@ -127,6 +128,8 @@ size_scales:
       - {code: "M/L", label: "M/L", sort_order: 20, channel_mappings: {walmart-mp: "M-L", targetplus: "M/L", nordstrom: "M/L"}}
       - {code: "P-S", label: "P-S", sort_order: 5, channel_mappings: {walmart-mp: "XS-S", targetplus: "P/S", nordstrom: "P-S"}}
       - {code: XLXXL, label: "XL/XXL", sort_order: 30, channel_mappings: {walmart-mp: "XL-XXL", targetplus: "XL/XXL", nordstrom: "XL/XXL"}}
+      - {code: "S/M", label: "S/M", sort_order: 15, channel_mappings: {walmart-mp: "S-M", targetplus: "S/M", nordstrom: "S/M"}}
+      - {code: "L/XL", label: "L/XL", sort_order: 25, channel_mappings: {walmart-mp: "L-XL", targetplus: "L/XL", nordstrom: "L/XL"}}
   - code: size_cup
     label: Cup sizes
     size_group: cup
@@ -139,6 +142,12 @@ size_scales:
       - {code: "D", label: "D", sort_order: 60}
       - {code: "DD", label: "DD", sort_order: 70}
       - {code: "DDD", label: "DDD", sort_order: 80}
+      - {code: "E", label: "E", sort_order: 90}
+      - {code: "EE", label: "EE", sort_order: 100}
+      - {code: "EEE", label: "EEE", sort_order: 110}
+      - {code: "F", label: "F", sort_order: 120}
+      - {code: "G", label: "G", sort_order: 130}
+      - {code: "G-H", label: "G-H", sort_order: 140}
   - code: size_one
     label: One size
     size_group: one_size
@@ -166,6 +175,7 @@ size_scales:
     label: Women's plus sizes (W)
     size_group: womens_plus
     values:
+      - {code: "14W", label: "14W", sort_order: 5}
       - {code: "16W", label: "16W", sort_order: 10}
       - {code: "18W", label: "18W", sort_order: 20}
       - {code: "20W", label: "20W", sort_order: 30}
@@ -182,6 +192,7 @@ size_scales:
       - {code: "4X", label: "4X", sort_order: 40}
       - {code: "5X", label: "5X", sort_order: 50}
       - {code: "6X", label: "6X", sort_order: 60}
+      - {code: "1X/2X", label: "1X/2X", sort_order: 15}
   - code: size_bra
     label: Bra band and cup sizes
     size_group: cup
@@ -216,3 +227,27 @@ size_scales:
       - {code: "40D", label: "40D", sort_order: 280}
       - {code: "40DD", label: "40DD", sort_order: 290}
       - {code: "40DDD", label: "40DDD", sort_order: 300}
+  - code: size_junior
+    label: Junior sizes
+    size_group: juniors
+    values:
+      - {code: "1", label: "1", sort_order: 10}
+      - {code: "3", label: "3", sort_order: 20}
+      - {code: "5", label: "5", sort_order: 30}
+      - {code: "7", label: "7", sort_order: 40}
+      - {code: "9", label: "9", sort_order: 50}
+      - {code: "11", label: "11", sort_order: 60}
+      - {code: "13", label: "13", sort_order: 70}
+      - {code: "15", label: "15", sort_order: 80}
+  - code: size_numeric_range
+    label: Numeric size ranges
+    size_group: missy
+    values:
+      - {code: "0/2", label: "0/2", sort_order: 10}
+      - {code: "2/4", label: "2/4", sort_order: 20}
+      - {code: "4/6", label: "4/6", sort_order: 30}
+      - {code: "6/8", label: "6/8", sort_order: 40}
+      - {code: "8/10", label: "8/10", sort_order: 50}
+      - {code: "10/12", label: "10/12", sort_order: 60}
+      - {code: "12/14", label: "12/14", sort_order: 70}
+      - {code: "14/16", label: "14/16", sort_order: 80}

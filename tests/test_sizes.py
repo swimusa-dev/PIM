@@ -81,3 +81,16 @@ def test_reevaluate_marks_existing_pp_skus_as_prepacks(session):
     session.expire_all()
     sku = _sku(session, "730005", "PP")
     assert result["prepacks_marked"] >= 1 and sku.entity_type == "prepack" and not sku.size_unmapped
+
+
+def test_juniors_ranges_and_spelling_variants_match(session):
+    sizes = ["5", "7", "S-M", "S/M", "SM/MD", "L-XL", "L/XL", "LG/XL", "M-L", "0/2", "8/10", "12/14", "1X/2X",
+             "MED", "LRG", "XXXL", "14W", "E", "EE", "EEE", "G", "G-H"]
+    _load(session, "730006", sizes)
+    assert _open_size_defects(session, "730006") == []
+    assert not any(_sku(session, "730006", z).size_unmapped for z in sizes)
+
+
+def test_sizes_not_yet_mapped_stay_defects(session):
+    _load(session, "730007", ["PCS", "10L", "2T"])
+    assert {d.raw_value for d in _open_size_defects(session, "730007")} == {"PCS", "10L", "2T"}

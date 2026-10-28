@@ -109,8 +109,10 @@ class Metadata:
 
 
 # Style Master spellings of a size that is the same size under another code (a scale value of its own would
-# duplicate the channel mappings): the abbreviated alphas and the two "no size" markers.
-SIZE_ALIASES = {"LG": "L", "SM": "S", "MD": "M", "NOSIZ": "OS", "NS": "OS"}
+# duplicate the channel mappings): the abbreviated alphas, the dashed and abbreviated ranges, and the two "no size"
+# markers.
+SIZE_ALIASES = {"LG": "L", "SM": "S", "MD": "M", "MED": "M", "LRG": "L", "NOSIZ": "OS", "NS": "OS",
+                "S-M": "S/M", "SM/MD": "S/M", "M-L": "M/L", "L-XL": "L/XL", "LG/XL": "L/XL"}
 # A pack, not a size: the SKU is a prepack and has no size to check against a scale.
 PREPACK_SIZES = {"PP"}
 
