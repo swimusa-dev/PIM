@@ -29,7 +29,7 @@ from pim.models import (
 )
 from pim.models._common import utcnow
 from pim.normalization import looks_like_test_value, map_raw_to_option, normalize_identifier
-from pim.services.metadata import Metadata, load_metadata
+from pim.services.metadata import PREPACK_SIZES, Metadata, load_metadata
 from pim.services.readiness import refresh_snapshots
 from pim.services.values import NA_SENTINEL, new_change_set, set_value
 
@@ -235,7 +235,8 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
             cls_code = map_raw_to_option(cls_raw, meta.value_mappings.get(("erp", "brand_classification"), {}),
                                          meta.option_codes("brand_classification")).option_code
         discontinued = _is_truthy(row.get("discontinued")) or "DISC" in str(row.get("style_status") or "").upper()
-        is_prepack = bool(_s(row.get("pack_type"))) or (size is None and color and sku and any(
+        size_is_pack = bool(size) and size.upper() in PREPACK_SIZES
+        is_prepack = bool(_s(row.get("pack_type"))) or size_is_pack or (size is None and color and sku and any(
             t in (sku or "").upper() for t in ("AST", "PPK", "PREPACK")))
 
         # Style
@@ -289,7 +290,9 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
                             session.add(PrepackComponent(prepack_id=sk.id, sku_id=tgt.entity_id))
             _add_alias(session, alias_seen, sk, sk.sku, "sku")
             _add_alias(session, alias_seen, sk, upc, "upc")
-            if size:
+            if size_is_pack:
+                sk.size_unmapped = False
+            elif size:
                 entry = meta.size_scale_entry(size)
                 sk.size_unmapped = entry is None
                 if entry is None:

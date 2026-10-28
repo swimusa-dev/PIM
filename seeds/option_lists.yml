@@ -134,6 +134,11 @@ size_scales:
       - {code: "A/B", label: "A/B", sort_order: 10}
       - {code: "C", label: "C", sort_order: 20}
       - {code: "D/DD", label: "D/DD", sort_order: 30}
+      - {code: "A", label: "A", sort_order: 40}
+      - {code: "B", label: "B", sort_order: 50}
+      - {code: "D", label: "D", sort_order: 60}
+      - {code: "DD", label: "DD", sort_order: 70}
+      - {code: "DDD", label: "DDD", sort_order: 80}
   - code: size_one
     label: One size
     size_group: one_size
@@ -151,3 +156,63 @@ size_scales:
       - {code: "10", label: "10", sort_order: 10}
       - {code: "12", label: "12", sort_order: 12}
       - {code: "14", label: "14", sort_order: 14}
+      - {code: "16", label: "16", sort_order: 16}
+      - {code: "18", label: "18", sort_order: 18}
+      - {code: "20", label: "20", sort_order: 20}
+      - {code: "22", label: "22", sort_order: 22}
+      - {code: "24", label: "24", sort_order: 24}
+      - {code: "26", label: "26", sort_order: 26}
+  - code: size_plus_w
+    label: Women's plus sizes (W)
+    size_group: womens_plus
+    values:
+      - {code: "16W", label: "16W", sort_order: 10}
+      - {code: "18W", label: "18W", sort_order: 20}
+      - {code: "20W", label: "20W", sort_order: 30}
+      - {code: "22W", label: "22W", sort_order: 40}
+      - {code: "24W", label: "24W", sort_order: 50}
+      - {code: "26W", label: "26W", sort_order: 60}
+  - code: size_plus_x
+    label: Plus X sizes
+    size_group: womens_plus
+    values:
+      - {code: "1X", label: "1X", sort_order: 10}
+      - {code: "2X", label: "2X", sort_order: 20}
+      - {code: "3X", label: "3X", sort_order: 30}
+      - {code: "4X", label: "4X", sort_order: 40}
+      - {code: "5X", label: "5X", sort_order: 50}
+      - {code: "6X", label: "6X", sort_order: 60}
+  - code: size_bra
+    label: Bra band and cup sizes
+    size_group: cup
+    values:
+      - {code: "32A", label: "32A", sort_order: 10}
+      - {code: "32B", label: "32B", sort_order: 20}
+      - {code: "32C", label: "32C", sort_order: 30}
+      - {code: "32D", label: "32D", sort_order: 40}
+      - {code: "32DD", label: "32DD", sort_order: 50}
+      - {code: "32DDD", label: "32DDD", sort_order: 60}
+      - {code: "34A", label: "34A", sort_order: 70}
+      - {code: "34B", label: "34B", sort_order: 80}
+      - {code: "34C", label: "34C", sort_order: 90}
+      - {code: "34D", label: "34D", sort_order: 100}
+      - {code: "34DD", label: "34DD", sort_order: 110}
+      - {code: "34DDD", label: "34DDD", sort_order: 120}
+      - {code: "36A", label: "36A", sort_order: 130}
+      - {code: "36B", label: "36B", sort_order: 140}
+      - {code: "36C", label: "36C", sort_order: 150}
+      - {code: "36D", label: "36D", sort_order: 160}
+      - {code: "36DD", label: "36DD", sort_order: 170}
+      - {code: "36DDD", label: "36DDD", sort_order: 180}
+      - {code: "38A", label: "38A", sort_order: 190}
+      - {code: "38B", label: "38B", sort_order: 200}
+      - {code: "38C", label: "38C", sort_order: 210}
+      - {code: "38D", label: "38D", sort_order: 220}
+      - {code: "38DD", label: "38DD", sort_order: 230}
+      - {code: "38DDD", label: "38DDD", sort_order: 240}
+      - {code: "40A", label: "40A", sort_order: 250}
+      - {code: "40B", label: "40B", sort_order: 260}
+      - {code: "40C", label: "40C", sort_order: 270}
+      - {code: "40D", label: "40D", sort_order: 280}
+      - {code: "40DD", label: "40DD", sort_order: 290}
+      - {code: "40DDD", label: "40DDD", sort_order: 300}

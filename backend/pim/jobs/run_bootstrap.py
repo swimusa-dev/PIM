@@ -23,9 +23,12 @@ def main() -> None:
     command.upgrade(cfg, "head")
     from pim.db.seed import seed_all
     from pim.db.session import session_scope
+    from pim.services.sizes import reevaluate_sizes
 
     with session_scope() as s:
         counts = seed_all(s)
+        s.flush()
+        counts.update(reevaluate_sizes(s))  # a scale that gained a value clears its SKUs' size flags and defects
         mark_job_run(s, "succeeded", counts)
     print(counts)
 
