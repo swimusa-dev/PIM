@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from pim.models import ErpDefect, ProductEntity
 from pim.models._common import utcnow
-from pim.services.metadata import PREPACK_SIZES, load_metadata
+from pim.services.metadata import NON_SIZE_VALUES, PREPACK_SIZES, load_metadata
 
 CHUNK = 1000
 
@@ -32,7 +32,8 @@ def reevaluate_sizes(session: Session) -> dict[str, int]:
 
     def matches(size: str) -> bool:
         if size not in verdict:
-            verdict[size] = size.strip().upper() in PREPACK_SIZES or meta.size_scale_entry(size) is not None
+            up = size.strip().upper()
+            verdict[size] = up in PREPACK_SIZES or up in NON_SIZE_VALUES or meta.size_scale_entry(size) is not None
         return verdict[size]
 
     open_defects: dict[str, list[str]] = {}

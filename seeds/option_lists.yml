@@ -251,3 +251,25 @@ size_scales:
       - {code: "10/12", label: "10/12", sort_order: 60}
       - {code: "12/14", label: "12/14", sort_order: 70}
       - {code: "14/16", label: "14/16", sort_order: 80}
+  - code: size_kids
+    label: Kids sizes
+    size_group: kids
+    values:
+      - {code: "2T", label: "2T", sort_order: 10}
+      - {code: "3T", label: "3T", sort_order: 20}
+      - {code: "4T/4", label: "4T/4", sort_order: 30}
+  - code: size_waist
+    label: Waist sizes (jeans)
+    size_group: waist
+    values:
+      - {code: "24", label: "24", sort_order: 10}
+      - {code: "26", label: "26", sort_order: 20}
+      - {code: "28", label: "28", sort_order: 30}
+      - {code: "30", label: "30", sort_order: 40}
+      - {code: "32", label: "32", sort_order: 50}
+      - {code: "34", label: "34", sort_order: 60}
+      - {code: "36", label: "36", sort_order: 70}
+      - {code: "38", label: "38", sort_order: 80}
+      - {code: "40", label: "40", sort_order: 90}
+      - {code: "42", label: "42", sort_order: 100}
+      - {code: "44", label: "44", sort_order: 110}

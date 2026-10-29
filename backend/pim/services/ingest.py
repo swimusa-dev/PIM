@@ -30,7 +30,7 @@ from pim.models import (
 )
 from pim.models._common import utcnow
 from pim.normalization import looks_like_test_value, map_raw_to_option, normalize_identifier
-from pim.services.metadata import PREPACK_SIZES, Metadata, load_metadata
+from pim.services.metadata import NON_SIZE_VALUES, PREPACK_SIZES, Metadata, load_metadata
 from pim.services.readiness import refresh_snapshots
 from pim.services.values import NA_SENTINEL, new_change_set, set_value
 
@@ -316,7 +316,7 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
                             session.add(PrepackComponent(prepack_id=sk.id, sku_id=tgt.entity_id))
             _add_alias(session, alias_seen, sk, sk.sku, "sku")
             _add_alias(session, alias_seen, sk, upc, "upc")
-            if size_is_pack:
+            if size_is_pack or (size and size.upper() in NON_SIZE_VALUES):
                 sk.size_unmapped = False
             elif size:
                 entry = meta.size_scale_entry(size)

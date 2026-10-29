@@ -113,8 +113,11 @@ class Metadata:
 # markers.
 SIZE_ALIASES = {"LG": "L", "SM": "S", "MD": "M", "MED": "M", "LRG": "L", "NOSIZ": "OS", "NS": "OS",
                 "S-M": "S/M", "SM/MD": "S/M", "M-L": "M/L", "L-XL": "L/XL", "LG/XL": "L/XL"}
-# A pack, not a size: the SKU is a prepack and has no size to check against a scale.
-PREPACK_SIZES = {"PP"}
+# A pack, not a size: the SKU is a prepack and has no size to check against a scale. PP, and the 10L to 18L range packs
+# (each holds 10L, 12L, 14L, 16L and 18L).
+PREPACK_SIZES = {"PP", "10L", "12L", "14L", "16L", "18L"}
+# Not a size and not a pack either (PCS is a piece count, typically an accessory): nothing to check against a scale.
+NON_SIZE_VALUES = {"PCS"}
 
 
 _cache: Metadata | None = None
