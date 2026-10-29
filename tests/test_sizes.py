@@ -92,5 +92,29 @@ def test_juniors_ranges_and_spelling_variants_match(session):
 
 
 def test_sizes_not_yet_mapped_stay_defects(session):
-    _load(session, "730007", ["PCS", "10L", "2T"])
-    assert {d.raw_value for d in _open_size_defects(session, "730007")} == {"PCS", "10L", "2T"}
+    _load(session, "730007", ["X", "MP", "LP", "8L"])
+    assert {d.raw_value for d in _open_size_defects(session, "730007")} == {"X", "MP", "LP", "8L"}
+
+
+def test_kids_and_waist_sizes_match(session):
+    sizes = ["2T", "3T", "4T/4", "28", "30", "32", "36", "44"]
+    _load(session, "730008", sizes)
+    assert _open_size_defects(session, "730008") == []
+
+
+def test_range_packs_are_prepacks_and_pcs_is_not_checked(session):
+    _load(session, "730009", ["10L", "18L", "PCS"])
+    assert _open_size_defects(session, "730009") == []
+    assert _sku(session, "730009", "10L").entity_type == "prepack" and _sku(session, "730009", "18L").entity_type == "prepack"
+    pcs = _sku(session, "730009", "PCS")
+    assert pcs.entity_type != "prepack" and not pcs.size_unmapped
+
+
+def test_reevaluate_resolves_range_packs_and_pcs(session):
+    _load(session, "730010", ["S"])
+    sku = _sku(session, "730010", "S")
+    sku.size, sku.size_unmapped = "12L", True
+    session.flush()
+    result = reevaluate_sizes(session)
+    session.expire_all()
+    assert result["prepacks_marked"] >= 1 and _sku(session, "730010", "12L").entity_type == "prepack"
