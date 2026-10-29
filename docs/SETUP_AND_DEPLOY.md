@@ -192,6 +192,8 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    Families come from the Style Master's Body Type column (the view has no product type), through the rules in
    `seeds/families.yml`. After changing those rules, re-run bootstrap and then the `[PIM] Refresh product families`
    job: it re-reads only the style and body type and updates the loaded entities in bulk, so no full load is needed.
+   It also recomputes readiness and quality for the style-colors that move family (they depend on it). Add the
+   `--all-snapshots` job parameter to recompute every style-color.
 3. Check **Admin > ERP defects**. Unmapped ERP values appear here; add value mappings in
    `seeds/value_mappings.yml` (then re-run bootstrap) or in Admin > Option lists, and re-run the ingest.
    Size values are the exception: after adding a value to a size scale in `seeds/option_lists.yml`, re-running

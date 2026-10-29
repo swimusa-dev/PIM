@@ -495,11 +495,15 @@ def latest_successful_load(session: Session) -> IngestRun | None:
                            .order_by(IngestRun.finished_at.desc()).limit(1)).scalar_one_or_none()
 
 
-def refresh_families(session: Session, source: SourceAdapter) -> dict[str, Any]:
+def refresh_families(session: Session, source: SourceAdapter, all_snapshots: bool = False) -> dict[str, Any]:
     """Re-assign every loaded entity's family from the source, without loading the Style Master again. Reads only the
     columns the family rules need, works out one family per style (a style's first non-unassigned match) and
-    updates the style and all of its style-colors and SKUs in bulk. Safe to repeat: entities already in the right
-    family are not touched."""
+    updates the style and all of its style-colors and SKUs in bulk.
+
+    Readiness and quality are stored per style-color and depend on the family, so the style-colors that move get their
+    snapshots recomputed. Each chunk of styles is updated, recomputed and committed together, so a failed run leaves
+    the finished chunks consistent and a repeat redoes only the rest. Entities already in the right family are not
+    touched; `all_snapshots` recomputes the snapshots of every style-color regardless (for families moved earlier)."""
     meta = load_metadata(session, force=True)
     if hasattr(source, "wanted_columns"):
         source.wanted_columns = _family_columns(meta)
@@ -517,13 +521,25 @@ def refresh_families(session: Session, source: SourceAdapter) -> dict[str, Any]:
     styles_by_family: dict[str, list[str]] = {}
     for style, fam in by_style.items():
         styles_by_family.setdefault(fam, []).append(style)
-    changed = 0
+    changed = refreshed = 0
     for fam, styles in styles_by_family.items():
-        for i in range(0, len(styles), 1000):
+        for i in range(0, len(styles), 500):
+            part = styles[i:i + 500]
+            moving = [ProductEntity.level == "style_color", ProductEntity.style_number.in_(part)]
+            if not all_snapshots:
+                moving.append(ProductEntity.family_code.is_distinct_from(fam))
+            moved_ids = list(session.execute(select(ProductEntity.id).where(*moving)).scalars())
             result = session.execute(update(ProductEntity).where(
-                ProductEntity.style_number.in_(styles[i:i + 1000]),
-                ProductEntity.family_code.is_distinct_from(fam)).values(family_code=fam))
+                ProductEntity.style_number.in_(part), ProductEntity.family_code.is_distinct_from(fam)
+            ).values(family_code=fam))
             changed += result.rowcount or 0
-    session.flush()
-    return {"rows_read": rows, "styles": len(by_style), "entities_changed": changed,
+            for j in range(0, len(moved_ids), 500):
+                targets = list(session.execute(select(ProductEntity).where(
+                    ProductEntity.id.in_(moved_ids[j:j + 500]))).scalars())
+                refresh_snapshots(session, meta, targets)
+                refreshed += len(targets)
+            session.commit()
+            log.info("families: %s styles of %s done (%s entities changed, %s snapshots refreshed)",
+                     i + len(part), fam, changed, refreshed)
+    return {"rows_read": rows, "styles": len(by_style), "entities_changed": changed, "snapshots_refreshed": refreshed,
             "styles_by_family": {f: len(v) for f, v in sorted(styles_by_family.items())}}

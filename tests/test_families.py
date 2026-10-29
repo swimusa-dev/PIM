@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import select
 
-from pim.models import ProductEntity
+from pim.models import ProductEntity, ReadinessSnapshot
 from pim.services.ingest import _family_for, refresh_families, run_style_master_ingest
 
 CASES = [
@@ -89,3 +89,31 @@ def test_refresh_is_safe_to_repeat(session):
     source = RowsSource(_rows("750005", "SWIM TOP"))
     assert refresh_families(session, source)["entities_changed"] == 4
     assert refresh_families(session, source)["entities_changed"] == 0
+
+
+def _computed(session, style):
+    ids = [e.id for e in session.execute(select(ProductEntity).where(
+        ProductEntity.style_number == style, ProductEntity.level == "style_color")).scalars()]
+    return {r.channel_code: r.computed_at for r in session.execute(
+        select(ReadinessSnapshot).where(ReadinessSnapshot.entity_id.in_(ids))).scalars()}
+
+
+def test_refresh_recomputes_readiness_only_for_style_colors_that_move(session):
+    run_style_master_ingest(session, NoSource(), rows=_rows("750006") + _rows("750007"))
+    before_moved, before_kept = _computed(session, "750006"), _computed(session, "750007")
+    assert before_moved and before_kept
+    source = RowsSource(_rows("750006", "SWIM TOP") + _rows("750007"))  # 750007 stays unassigned
+    result = refresh_families(session, source)
+    assert result["snapshots_refreshed"] == 1
+    after_moved, after_kept = _computed(session, "750006"), _computed(session, "750007")
+    assert all(after_moved[c] > before_moved[c] for c in before_moved)
+    assert after_kept == before_kept
+
+
+def test_all_snapshots_recomputes_even_when_nothing_moves(session):
+    run_style_master_ingest(session, NoSource(), rows=_rows("750008"))
+    source = RowsSource(_rows("750008"))
+    before = _computed(session, "750008")
+    assert refresh_families(session, source)["snapshots_refreshed"] == 0
+    assert refresh_families(session, source, all_snapshots=True)["snapshots_refreshed"] == 1
+    assert all(_computed(session, "750008")[c] > before[c] for c in before)
