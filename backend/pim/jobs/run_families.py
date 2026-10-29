@@ -21,11 +21,13 @@ def main() -> None:
     p.add_argument("--source", default="delta", choices=["delta", "csv"])
     p.add_argument("--table")
     p.add_argument("--csv")
+    p.add_argument("--all-snapshots", action="store_true",
+                   help="recompute readiness and quality for every style-color, not only the ones that move family")
     a, _ = p.parse_known_args()
     src = CsvStyleMasterSource(a.csv) if a.source == "csv" else DeltaStyleMasterSource(a.table)
     try:
         with session_scope() as s:
-            result = refresh_families(s, src)
+            result = refresh_families(s, src, all_snapshots=a.all_snapshots)
             mark_job_run(s, "succeeded", result)
         print(result)
     except Exception as exc:  # noqa: BLE001
