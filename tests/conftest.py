@@ -37,7 +37,7 @@ MUTABLE_TABLES = [
     "publish_item", "eligibility_override", "image_rendition",
     "update_package_row", "update_package", "publish_record", "asset_link", "asset", "value_history", "value_draft",
     "product_value", "readiness_snapshot", "prepack_component", "identifier_alias", "workflow_item", "erp_defect",
-    "ingest_run", "job_run", "app_event", "saved_view", "reference_entity", "change_set", "product_entity",
+    "ingest_run", "source_style_hash", "job_run", "app_event", "saved_view", "reference_entity", "change_set", "product_entity",
 ]
 
 

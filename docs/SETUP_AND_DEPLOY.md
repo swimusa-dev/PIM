@@ -186,6 +186,11 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    The load reads the source in 16 slices and commits after each one, so a failure keeps the slices already loaded.
    Re-running the job resumes from the failed run (within 48 hours); add the `--fresh` job parameter to load
    everything again. The first load of the Image Relay view (about 207,000 rows) takes a few hours.
+   The ingest is incremental. It fingerprints each style's source rows and skips a style that has not changed since the
+   last load, so a scheduled run costs the read (a few minutes) plus the styles that changed. A style that changed is
+   processed whole. The first run after a deploy that adds this (or after the fingerprint table is empty) processes every
+   style, about 3 hours, and records the baseline. Add the `--full` job parameter to process every style again, for
+   example after a change to the load logic itself. `--fresh` implies `--full`.
    The first successful load only builds the catalog and starts no launch workflows. Later loads start a launch
    workflow for each style-color that is new to the catalog. Bootstrap cancels the untouched launch tasks an earlier
    first load opened, so "My open tasks" holds real work.

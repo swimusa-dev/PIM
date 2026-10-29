@@ -22,11 +22,12 @@ def main() -> None:
     p.add_argument("--table")
     p.add_argument("--csv")
     p.add_argument("--fresh", action="store_true", help="do not resume the slices a previous failed load committed")
+    p.add_argument("--full", action="store_true", help="process every style, not only the ones that changed since the last load")
     a, _ = p.parse_known_args()
     src = CsvStyleMasterSource(a.csv) if a.source == "csv" else DeltaStyleMasterSource(a.table)
     try:
         with session_scope() as s:
-            run = run_style_master_ingest(s, src, requested_by="job", resume=not a.fresh)
+            run = run_style_master_ingest(s, src, requested_by="job", resume=not a.fresh, full=a.full or a.fresh)
             mark_job_run(s, "succeeded", {"ingest_run_id": run.id, "rows_read": run.rows_read, "created": run.created,
                                           "updated": run.updated, "defects": run.defects_found})
     except Exception as exc:  # noqa: BLE001
