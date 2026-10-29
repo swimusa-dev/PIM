@@ -50,6 +50,7 @@ from pim.models.ops import (  # noqa: F401
     IngestRun,
     JobRun,
     PublishRecord,
+    SourceStyleHash,
     UpdatePackage,
     UpdatePackageRow,
     WorkflowDefinition,

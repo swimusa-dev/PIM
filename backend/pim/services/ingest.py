@@ -8,6 +8,8 @@ Never deletes: discontinued products are flagged. Never writes back to BlueCherr
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import logging
 import re
 from collections.abc import Iterable
@@ -15,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -26,6 +29,7 @@ from pim.models import (
     IngestRun,
     PrepackComponent,
     ProductEntity,
+    SourceStyleHash,
     WorkflowDefinition,
     WorkflowItem,
 )
@@ -98,6 +102,9 @@ class _Stats:
         self.workflows = 0
         self.placeholders_by_column: dict[str, int] = {}
         self.unmapped_sizes = 0
+        self.rows_unchanged = 0
+        self.styles_unchanged = 0
+        self.styles_changed = 0
 
 
 def _upsert_entity(session: Session, cache: dict[tuple, ProductEntity], level: str, style: str,
@@ -380,6 +387,61 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
     refresh_snapshots(session, meta, list(touched_style_colors.values()))
 
 
+# Mixed into every style fingerprint: bump it when the load logic changes in a way that should re-process every style
+# (the families, size scales and launch rules have their own refresh paths and do not need it).
+LOGIC_VERSION = "1"
+
+
+def _fingerprint(rows: list[dict]) -> str:
+    """Order-independent fingerprint of a style's source rows (only the columns the load reads)."""
+    parts = sorted(hashlib.sha1(json.dumps(sorted((k, None if v is None else str(v)) for k, v in r.items()),
+                                           separators=(",", ":")).encode()).hexdigest() for r in rows)
+    return hashlib.sha1((LOGIC_VERSION + "|" + "|".join(parts)).encode()).hexdigest()
+
+
+def _only_changed_styles(session: Session, source_name: str, chunk: Iterable[dict], stats: _Stats,
+                         full: bool = False) -> tuple[list[dict], dict[str, str]]:
+    """Drop the rows of styles whose source rows are exactly what the last load saw. A style is all or nothing: if any
+    of its rows changed, every row of it is processed again, so the per-style roll-ups (discontinued, launch) stay
+    right. Returns the rows to process and the new fingerprints to record once they are loaded. With `full` every style
+    is processed (and its fingerprint recorded, so the next incremental load has a baseline)."""
+    by_style: dict[str, list[dict]] = {}
+    keyless: list[dict] = []
+    for row in chunk:
+        style = _s(row.get("style_number"))
+        if style:
+            by_style.setdefault(_normalized_style(style), []).append(row)
+        else:
+            keyless.append(row)
+    known: dict[str, str] = {}
+    styles = [] if full else list(by_style)
+    for i in range(0, len(styles), 5000):
+        for style, digest in session.execute(select(SourceStyleHash.style_number, SourceStyleHash.row_hash).where(
+                SourceStyleHash.source == source_name, SourceStyleHash.style_number.in_(styles[i:i + 5000]))):
+            known[style] = digest
+    todo: list[dict] = list(keyless)
+    pending: dict[str, str] = {}
+    for style, rows in by_style.items():
+        digest = _fingerprint(rows)
+        if known.get(style) == digest:
+            stats.styles_unchanged += 1
+            stats.rows_unchanged += len(rows)
+        else:
+            stats.styles_changed += 1
+            pending[style] = digest
+            todo.extend(rows)
+    return todo, pending
+
+
+def _save_fingerprints(session: Session, source_name: str, pending: dict[str, str], now: datetime) -> None:
+    for i in range(0, len(pending), 2000):
+        part = list(pending.items())[i:i + 2000]
+        stmt = pg_insert(SourceStyleHash).values([{"source": source_name, "style_number": st, "row_hash": h, "loaded_at": now}
+                                                  for st, h in part])
+        session.execute(stmt.on_conflict_do_update(index_elements=["source", "style_number"],
+                                                   set_={"row_hash": stmt.excluded.row_hash, "loaded_at": now}))
+
+
 SLICE_ATTEMPTS = 3
 RESUME_WINDOW = timedelta(hours=48)
 
@@ -399,10 +461,13 @@ def _resumable_slices(session: Session, source_name: str, total: int) -> tuple[s
 
 def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",
                             since: datetime | None = None, rows: Iterable[dict] | None = None,
-                            resume: bool = True, launch_workflows: bool | None = None) -> IngestRun:
+                            resume: bool = True, launch_workflows: bool | None = None, full: bool = False) -> IngestRun:
     """Load the Style Master. A source that offers `slice_ids()` and `read_slice(id, since)` (the Delta source) is
     loaded one slice at a time: each slice commits, is retried if the database connection drops, and is recorded in
     the run report so a failed load resumes where it stopped. Any other source loads as a single chunk.
+
+    A sliced load is incremental: each style's source rows are fingerprinted and a style that has not changed since the
+    last load is skipped, so a scheduled run costs the read plus the styles that changed. `full` processes everything.
 
     Launch workflows are for style-colors that appear after the catalog exists. The first successful load only builds
     the catalog (every style-color is new to it), so it starts none, unless `launch_workflows` says otherwise."""
@@ -446,7 +511,12 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                         chunk = source.read_slice(sid, since)
                     else:
                         chunk = rows if rows is not None else source.read_changes(since)
+                    pending: dict[str, str] = {}
+                    if sliced:
+                        chunk, pending = _only_changed_styles(session, run.source, chunk, stats, full)
                     _ingest_rows(session, meta, change_set, chunk, stats, now, start_workflows)
+                    if pending:
+                        _save_fingerprints(session, run.source, pending, now)
                     if sliced:
                         completed.append(sid)
                         run.report = report()
@@ -462,7 +532,8 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                     log.warning("ingest: slice %s hit a database error (attempt %s of %s), retrying: %s",
                                 sid, attempt, SLICE_ATTEMPTS, str(exc)[:200])
             if sliced:
-                log.info("ingest: slice %s of %s committed (%s rows so far)", len(completed), len(slice_ids), stats.rows)
+                log.info("ingest: slice %s of %s committed (%s rows so far, %s styles unchanged)", len(completed), len(slice_ids),
+                         stats.rows + stats.rows_unchanged, stats.styles_unchanged)
         run.status = "succeeded"
         _finalize_run(run, stats, change_set.id)
         run.report = {**run.report, **report()}
@@ -483,11 +554,12 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
 
 def _finalize_run(run: IngestRun, stats: _Stats, change_set_id: str | None) -> None:
     run.finished_at = utcnow()
-    run.rows_read, run.created, run.updated = stats.rows, stats.created, stats.updated
+    run.rows_read, run.created, run.updated = stats.rows + stats.rows_unchanged, stats.created, stats.updated
     run.discontinued, run.placeholders_removed = stats.discontinued, stats.placeholders
     run.defects_found, run.workflows_started = stats.defects, stats.workflows
     run.report = {"placeholders_by_column": stats.placeholders_by_column, "unmapped_sizes": stats.unmapped_sizes,
-                  "change_set_id": change_set_id}
+                  "change_set_id": change_set_id, "rows_unchanged": stats.rows_unchanged,
+                  "styles_changed": stats.styles_changed, "styles_unchanged": stats.styles_unchanged}
 
 
 def latest_successful_load(session: Session) -> IngestRun | None:

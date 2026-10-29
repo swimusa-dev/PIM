@@ -45,6 +45,17 @@ class IngestRun(Base, IdMixin):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class SourceStyleHash(Base):
+    """Fingerprint of a style's Style Master rows as last loaded. The incremental ingest skips a style whose fingerprint
+    has not changed."""
+
+    __tablename__ = "source_style_hash"
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    style_number: Mapped[str] = mapped_column(String(64), primary_key=True)
+    row_hash: Mapped[str] = mapped_column(String(40), nullable=False)
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ErpDefect(Base, IdMixin):
     """IMP-11: ERP values that match no mapping or look like test data; reported back to BlueCherry owners."""
 
