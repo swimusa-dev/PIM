@@ -26,6 +26,7 @@ from pim.models import (
     PrepackComponent,
     ProductEntity,
     WorkflowDefinition,
+    WorkflowItem,
 )
 from pim.models._common import utcnow
 from pim.normalization import looks_like_test_value, map_raw_to_option, normalize_identifier
@@ -194,6 +195,31 @@ def _start_launch_workflow(session: Session, ent: ProductEntity, stats: _Stats, 
         stats.workflows += 1
 
 
+def close_baseline_launch_items(session: Session) -> int:
+    """Cancel the launch tasks the first load started for the whole existing catalog. They were never worked
+    (the history holds only the start by the ingest) and were created while the first successful load ran, so tasks
+    started by later loads, or touched by anyone, stay. Safe to repeat: a cancelled task no longer matches."""
+    base = session.execute(select(IngestRun).where(IngestRun.status == "succeeded")
+                           .order_by(IngestRun.started_at.asc()).limit(1)).scalar_one_or_none()
+    if base is None or base.finished_at is None:
+        return 0
+    now = utcnow()
+    closed = 0
+    items = session.execute(select(WorkflowItem).join(WorkflowDefinition, WorkflowDefinition.id == WorkflowItem.workflow_id)
+                            .where(WorkflowDefinition.code == "new_style_color_launch", WorkflowItem.state == "open",
+                                   WorkflowItem.created_at >= base.started_at, WorkflowItem.created_at <= base.finished_at)
+                            ).scalars()
+    for item in items:
+        if len(item.history) != 1 or item.history[0].get("event") != "started" or item.history[0].get("by") != "ingest":
+            continue
+        item.state, item.current_step_id, item.due_at, item.assigned_role = "cancelled", None, None, None
+        item.history = [*item.history, {"at": now.isoformat(), "event": "cancelled",
+                                        "reason": "started by the first load for the existing catalog"}]
+        closed += 1
+    session.flush()
+    return closed
+
+
 def _columns_read(meta: Metadata) -> set[str]:
     """Style Master columns the ingest reads besides the key aliases, so a wide source can be narrowed."""
     cols = {a.erp_column for a in meta.attributes.values() if a.erp_column and a.status != "deprecated"}
@@ -202,7 +228,7 @@ def _columns_read(meta: Metadata) -> set[str]:
 
 
 def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: Iterable[dict], stats: _Stats,
-                 now: datetime) -> None:
+                 now: datetime, launch: bool = True) -> None:
     """Load one chunk of Style Master rows: entities, aliases and ERP values, then the lifecycle roll-up, launch
     workflows and readiness for what the chunk touched. The caller commits. A style's rows all fall in one chunk
     (the Delta source slices by style number), so the per-style roll-up below is complete within a chunk."""
@@ -318,7 +344,7 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
         elif st.lifecycle_status == "discontinued":
             st.lifecycle_status = "active"
     # Promote "new" to "active" once ERP attributes exist, start launch workflows for new style-colors
-    for sc in new_style_colors:
+    for sc in new_style_colors if launch else ():
         _start_launch_workflow(session, sc, stats, now)
     for ent in cache.values():
         if ent.lifecycle_status == "new" and ent.id not in {e.id for e in new_style_colors}:
@@ -346,10 +372,13 @@ def _resumable_slices(session: Session, source_name: str, total: int) -> tuple[s
 
 def run_style_master_ingest(session: Session, source: SourceAdapter, requested_by: str = "job",
                             since: datetime | None = None, rows: Iterable[dict] | None = None,
-                            resume: bool = True) -> IngestRun:
+                            resume: bool = True, launch_workflows: bool | None = None) -> IngestRun:
     """Load the Style Master. A source that offers `slice_ids()` and `read_slice(id, since)` (the Delta source) is
     loaded one slice at a time: each slice commits, is retried if the database connection drops, and is recorded in
-    the run report so a failed load resumes where it stopped. Any other source loads as a single chunk."""
+    the run report so a failed load resumes where it stopped. Any other source loads as a single chunk.
+
+    Launch workflows are for style-colors that appear after the catalog exists. The first successful load only builds
+    the catalog (every style-color is new to it), so it starts none, unless `launch_workflows` says otherwise."""
     sliced = rows is None and hasattr(source, "slice_ids")
     if hasattr(source, "wanted_columns"):
         source.wanted_columns = _columns_read(load_metadata(session, force=True))
@@ -358,14 +387,22 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
         if sliced and resume else (set(), None)
     completed: list[int] = sorted(done)
 
+    start_workflows: bool = False
+
     def report() -> dict:
         return {"slices_total": len(slice_ids) if sliced else 0, "completed_slices": list(completed),
-                "resumed_from": resumed_from}
+                "resumed_from": resumed_from, "launch_workflows": start_workflows}
 
     run = IngestRun(source=getattr(source, "name", "bluecherry"), status="running", report=report())
     session.add(run)
     session.flush()
     change_set = new_change_set(session, "ingest", requested_by, "Style Master ingest", source_ref=run.id)
+    if launch_workflows is None:
+        start_workflows = session.execute(select(IngestRun.id).where(
+            IngestRun.status == "succeeded", IngestRun.id != run.id).limit(1)).first() is not None
+    else:
+        start_workflows = launch_workflows
+    run.report = report()
     session.commit()  # the run row and its change set outlive a later rollback, so a failure can be recorded on it
     stats = _Stats()
     now = utcnow()
@@ -382,7 +419,7 @@ def run_style_master_ingest(session: Session, source: SourceAdapter, requested_b
                         chunk = source.read_slice(sid, since)
                     else:
                         chunk = rows if rows is not None else source.read_changes(since)
-                    _ingest_rows(session, meta, change_set, chunk, stats, now)
+                    _ingest_rows(session, meta, change_set, chunk, stats, now, start_workflows)
                     if sliced:
                         completed.append(sid)
                         run.report = report()

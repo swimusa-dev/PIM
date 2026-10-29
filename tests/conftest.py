@@ -102,7 +102,8 @@ def ingested(session):
     from pim.adapters.bluecherry_source import CsvStyleMasterSource
     from pim.services.ingest import run_style_master_ingest
 
-    run = run_style_master_ingest(session, CsvStyleMasterSource(FIXTURES / "style_master_sample.csv"), requested_by="test")
+    run = run_style_master_ingest(session, CsvStyleMasterSource(FIXTURES / "style_master_sample.csv"), requested_by="test",
+                                  launch_workflows=True)
     session.commit()
     invalidate()
     return run
