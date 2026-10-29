@@ -58,6 +58,27 @@ resources:
         - {name: job_run_id, default: ""}
       max_concurrent_runs: 1
 
+    pim_families_refresh:
+      name: "[PIM] Refresh product families"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: families
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_families.py
+            parameters: ["--source", "delta", "--table", "${var.catalog}.image_relay_view.vw_image_relay_export_style_master",
+                         "--pg-host", "${var.lakebase_host}", "--pg-user", "${var.lakebase_user}",
+                         "--pg-database", "${var.lakebase_database}", "--lakebase-instance", "${var.lakebase_instance}",
+                         "--sql-warehouse-id", "${var.sql_warehouse_id}", "--job-run-id", "{{job.parameters.job_run_id}}"]
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
     pim_air_poll:
       name: "[PIM] Air DAM poll and image match (IMG-01, IMG-03)"
       schedule:

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -50,19 +51,40 @@ def _is_truthy(v: Any) -> bool:
     return str(v or "").strip().lower() in ("1", "true", "yes", "y", "d", "discontinued", "inactive")
 
 
-def _family_for(meta: Metadata, row: dict) -> str | None:
-    for fam in meta.families.values():
-        rule = fam.erp_match or {}
-        if not rule:
+def _rule_fields(rule: dict) -> list[str]:
+    """The ERP fields a family rule reads: `fields` (a list, tried in turn) or the older single `field`."""
+    f = rule.get("fields") or rule.get("field")
+    return [f] if isinstance(f, str) else list(f or [])
+
+
+def _rule_matches(rule: dict, row: dict) -> bool:
+    for field in _rule_fields(rule):
+        val = str(row.get(field, "") or "").upper()
+        if not val:
             continue
-        val = str(row.get(rule.get("field", ""), "") or "").upper()
         if "in" in rule and val in {str(x).upper() for x in rule["in"]}:
-            return fam.code
+            return True
         if "eq" in rule and val == str(rule["eq"]).upper():
-            return fam.code
+            return True
         if "contains" in rule and str(rule["contains"]).upper() in val:
+            return True
+        if any(re.search(p, val) for p in rule.get("regex_any", ())):
+            return True
+    return False
+
+
+def _family_for(meta: Metadata, row: dict) -> str | None:
+    """First family whose rule matches, in `priority` order (lower first; the default is 100, then by code)."""
+    ruled = sorted((f for f in meta.families.values() if f.erp_match),
+                   key=lambda f: (f.erp_match.get("priority", 100), f.code))
+    for fam in ruled:
+        if _rule_matches(fam.erp_match, row):
             return fam.code
     return "unassigned" if "unassigned" in meta.families else None
+
+
+def _normalized_style(raw: str) -> str:
+    return normalize_identifier(raw) if "-" in raw or " " in raw else raw.strip()
 
 
 class _Stats:
@@ -223,8 +245,13 @@ def close_baseline_launch_items(session: Session) -> int:
 def _columns_read(meta: Metadata) -> set[str]:
     """Style Master columns the ingest reads besides the key aliases, so a wide source can be narrowed."""
     cols = {a.erp_column for a in meta.attributes.values() if a.erp_column and a.status != "deprecated"}
-    cols |= {(f.erp_match or {}).get("field") for f in meta.families.values() if (f.erp_match or {}).get("field")}
+    cols |= _family_columns(meta)
     return cols
+
+
+def _family_columns(meta: Metadata) -> set[str]:
+    """Style Master columns the family rules read."""
+    return {c for f in meta.families.values() for c in _rule_fields(f.erp_match or {}) if c}
 
 
 def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: Iterable[dict], stats: _Stats,
@@ -246,7 +273,7 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
         style = _s(row.get("style_number"))
         if not style:
             continue
-        style = normalize_identifier(style) if "-" in style or " " in style else style.strip()
+        style = _normalized_style(style)
         color = _s(row.get("color_code"))
         size = _s(row.get("size"))
         sku = _s(row.get("sku"))
@@ -466,3 +493,37 @@ def _finalize_run(run: IngestRun, stats: _Stats, change_set_id: str | None) -> N
 def latest_successful_load(session: Session) -> IngestRun | None:
     return session.execute(select(IngestRun).where(IngestRun.status == "succeeded")
                            .order_by(IngestRun.finished_at.desc()).limit(1)).scalar_one_or_none()
+
+
+def refresh_families(session: Session, source: SourceAdapter) -> dict[str, Any]:
+    """Re-assign every loaded entity's family from the source, without loading the Style Master again. Reads only the
+    columns the family rules need, works out one family per style (a style's first non-unassigned match) and
+    updates the style and all of its style-colors and SKUs in bulk. Safe to repeat: entities already in the right
+    family are not touched."""
+    meta = load_metadata(session, force=True)
+    if hasattr(source, "wanted_columns"):
+        source.wanted_columns = _family_columns(meta)
+    by_style: dict[str, str] = {}
+    rows = 0
+    for row in source.read_changes():
+        rows += 1
+        style = _s(row.get("style_number"))
+        if not style:
+            continue
+        style = _normalized_style(style)
+        fam = _family_for(meta, row) or "unassigned"
+        if by_style.get(style, "unassigned") == "unassigned":
+            by_style[style] = fam
+    styles_by_family: dict[str, list[str]] = {}
+    for style, fam in by_style.items():
+        styles_by_family.setdefault(fam, []).append(style)
+    changed = 0
+    for fam, styles in styles_by_family.items():
+        for i in range(0, len(styles), 1000):
+            result = session.execute(update(ProductEntity).where(
+                ProductEntity.style_number.in_(styles[i:i + 1000]),
+                ProductEntity.family_code.is_distinct_from(fam)).values(family_code=fam))
+            changed += result.rowcount or 0
+    session.flush()
+    return {"rows_read": rows, "styles": len(by_style), "entities_changed": changed,
+            "styles_by_family": {f: len(v) for f, v in sorted(styles_by_family.items())}}
