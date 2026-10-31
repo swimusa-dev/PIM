@@ -214,6 +214,8 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    - After either change, use **Apply to loaded products**. It runs the `[PIM] Apply eligibility changes (D-15)` job,
      which re-derives every product's brand scopes from its stored ERP fields and recomputes channel readiness and
      quality (a few minutes for the full catalog). No Style Master load is needed.
+   The seed files only supply the starting channel eligibility and brand scopes: re-running bootstrap never overwrites
+   what was edited in the app (a seeded scope or channel that is missing is still created).
 
 Column names: `seeds/attributes.yml` maps ERP attributes to Style Master columns through `erp_column`, using
 the names seen in the Image Relay export and the VAS request sheet, normalized to lower snake case. Compare

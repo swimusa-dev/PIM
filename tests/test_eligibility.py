@@ -169,3 +169,31 @@ def test_recompute_rederives_brand_scopes_from_the_stored_erp_fields(client, ses
     assert "new_brand" in other.brand_scopes
     if sku is not None:
         assert "new_brand" in session.get(ProductEntity, sku.id).brand_scopes  # SKUs follow their style-color
+
+
+def test_bootstrap_does_not_undo_what_users_set_in_the_app(client, session):
+    from pim.db.seed import seed_all
+
+    rules = [[{"field": "division", "op": "eq", "value": "SOMETHING ELSE"}]]
+    assert client.put("/api/metadata/channels/walmart-mp/eligibility", headers=ADMIN, json={"eligibility": {"exclude_lifecycle": ["new"]}}).status_code == 200
+    assert client.put("/api/metadata/brand-scopes/vitamin_a", headers=ADMIN, json={"label": "Vitamin A (edited)", "rules": rules, "enabled": False}).status_code == 200
+    assert client.put("/api/metadata/brand-scopes/mine", headers=ADMIN, json={"label": "Mine", "rules": rules}).status_code == 200
+    seed_all(session)  # what the bootstrap job runs after every deploy
+    session.commit()
+    session.expire_all()
+    assert session.get(Channel, "walmart-mp").eligibility == {"exclude_lifecycle": ["new"]}
+    va = session.get(BrandScope, "vitamin_a")
+    assert (va.label, va.enabled, va.rules[0][0]["value"]) == ("Vitamin A (edited)", False, "SOMETHING ELSE")
+    assert session.get(BrandScope, "mine") is not None
+
+
+def test_bootstrap_still_creates_a_seeded_channel_and_scope_that_is_missing(client, session):
+    from pim.db.seed import seed_all
+
+    session.delete(session.get(BrandScope, "ralph_lauren_swim"))
+    session.commit()
+    seed_all(session)
+    session.commit()
+    session.expire_all()
+    assert session.get(BrandScope, "ralph_lauren_swim") is not None
+
