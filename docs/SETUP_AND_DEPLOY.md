@@ -426,6 +426,7 @@ voices, templates and versions, AI runs and outputs, the evaluation set, quality
 |---|---|
 | App starts but every request returns 401 | The app is being reached without the Databricks proxy headers. Open it through its Databricks URL. |
 | `Set PIM_DATABASE_URL or bind a Lakebase resource` on startup | The Lakebase resource is not bound; check the app's Resources tab and `valueFrom: lakebase` in `app.yaml`. |
+| `scripts/deploy.sh` stops with `Number of app resources must be less than or equal to 20` | A Databricks App can have at most 20 resources and this app uses all of them (`resources/app.yml`). The job and files upload first, then the app update is refused, so the app keeps its old code. Free a slot (remove a resource nothing reads, or fold a job into an existing one) before adding another; `tests/test_app_bundle.py` checks the count. |
 | Postgres `password authentication failed` after about an hour | Token rotation. The pool refreshes tokens at 50 minutes and recycles connections; check that the app SP still has a Lakebase role. PLT-00 step 5 soak test. |
 | Ingest job fails with `PIM_SQL_WAREHOUSE_ID is required` | Set `sql_warehouse_id` in `databricks.yml` and redeploy. |
 | Header banner says Style Master data is stale | The ingest schedule is paused or failing; see Admin > Telemetry. |
