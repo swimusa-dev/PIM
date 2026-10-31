@@ -3,12 +3,13 @@
 // schedule, health).
 
 import { Fragment, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useChannels } from "../api/hooks";
 import type { Channel } from "../api/types";
 import { Badge, Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
 import { ChannelEditor } from "./ChannelEditor";
+import { EligibilityDialog, RecomputeButton } from "./Eligibility";
 
 export function ChannelsTab() {
   const channels = useChannels();
@@ -16,6 +17,10 @@ export function ChannelsTab() {
   const toast = useToast();
   const [editing, setEditing] = useState<Channel | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [eligibilityFor, setEligibilityFor] = useState<Channel | null>(null);
+  const [needsApply, setNeedsApply] = useState(false);
+  const options = useQuery({ queryKey: ["metadata", "eligibility-options"], queryFn: api.metadata.eligibilityOptions });
+  const scopeLabel = (code: string) => options.data?.brand_scopes.find((s) => s.code === code)?.label ?? code;
 
   const save = useMutation({
     mutationFn: (c: Channel) => api.metadata.saveChannel(c.code, c),
@@ -43,6 +48,14 @@ export function ChannelsTab() {
           Add channel
         </button>
       </div>
+      {needsApply && (
+        <div className="panel mb8">
+          <div className="panel-body row" style={{ justifyContent: "space-between" }}>
+            <span className="small">Eligibility changed. Apply it to the products already loaded to update channel readiness.</span>
+            <RecomputeButton primary onDone={() => setNeedsApply(false)} />
+          </div>
+        </div>
+      )}
       {channels.data!.length === 0 ? (
         <Empty title="No channels">Add Shopify first; retailer and marketplace channels follow.</Empty>
       ) : (
@@ -56,6 +69,7 @@ export function ChannelsTab() {
                 <th>Adapter</th>
                 <th>Enabled</th>
                 <th>Requirement set</th>
+                <th>Eligible brands</th>
                 <th>Protected fields</th>
                 <th>Version</th>
                 <th />
@@ -77,6 +91,16 @@ export function ChannelsTab() {
                   <td className="mono">{c.requirement_set_code ?? <span className="faint">none</span>}</td>
                   <td>
                     <div className="chips">
+                      {(c.eligibility?.brand_scopes ?? []).map((code) => (
+                        <span key={code} className="badge">
+                          {scopeLabel(code)}
+                        </span>
+                      ))}
+                      {(c.eligibility?.brand_scopes ?? []).length === 0 && <span className="faint">every brand</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="chips">
                       {c.protected_fields.map((f) => (
                         <span key={f} className="badge amber">
                           {f}
@@ -92,12 +116,15 @@ export function ChannelsTab() {
                     </button>{" "}
                     <button className="small" onClick={() => setEditing(c)}>
                       Edit
+                    </button>{" "}
+                    <button className="small" onClick={() => setEligibilityFor(c)} title="Which brands and products this channel admits">
+                      Eligibility
                     </button>
                   </td>
                 </tr>
                 {expanded === c.code && (
                   <tr className="expanded-row">
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <ChannelEditor channel={c} />
                     </td>
                   </tr>
@@ -107,6 +134,16 @@ export function ChannelsTab() {
             </tbody>
           </table>
         </div>
+      )}
+      {eligibilityFor && (
+        <EligibilityDialog
+          channel={eligibilityFor}
+          onClose={() => setEligibilityFor(null)}
+          onSaved={() => {
+            setEligibilityFor(null);
+            setNeedsApply(true);
+          }}
+        />
       )}
       {editing && (
         <ChannelDialog

@@ -53,14 +53,17 @@ def _load(name: str) -> dict:
         return yaml.safe_load(fh) or {}
 
 
-def _upsert(session: Session, model, pk: str, data: dict):  # noqa: ANN001
+def _upsert(session: Session, model, pk: str, data: dict, keep: tuple[str, ...] = ()):  # noqa: ANN001
+    """Insert, or update from the seed. `keep` names fields the seed only supplies when the row is created: users edit
+    them in the app (Admin > Channels > Eligibility, Admin > Brand scopes), so a later bootstrap must not undo that."""
     obj = session.get(model, data[pk])
     if obj is None:
         obj = model(**data)
         session.add(obj)
     else:
         for k, v in data.items():
-            setattr(obj, k, v)
+            if k not in keep:
+                setattr(obj, k, v)
     return obj
 
 
@@ -136,7 +139,7 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
     session.flush()
     for c in ch.get("channels", []):
         rs_code = c.pop("requirement_set", None)
-        obj = _upsert(session, Channel, "code", c)
+        obj = _upsert(session, Channel, "code", c, keep=("eligibility",))
         session.flush()
         if rs_code:
             binding = session.get(ChannelRequirementBinding, {"channel_code": obj.code, "family_code": "*"})
@@ -159,7 +162,7 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
         _upsert(session, Role, "code", r)
         counts["roles"] = counts.get("roles", 0) + 1
     for b in roles.get("brand_scopes", []):
-        _upsert(session, BrandScope, "code", b)
+        _upsert(session, BrandScope, "code", b, keep=("label", "rules", "enabled"))
     session.flush()
     for ur in roles.get("user_roles", []):
         existing = session.execute(

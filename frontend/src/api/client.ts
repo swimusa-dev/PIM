@@ -122,6 +122,15 @@ import type {
   RestoreToResult,
   RollbackResult,
 } from "./types";
+import type {
+  BrandScopeDef,
+  ChannelEligibility,
+  EligibilityImpact,
+  EligibilityOptions,
+  RecomputeResult,
+  ScopeCondition,
+  ScopeMatches,
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -192,6 +201,17 @@ export const api = {
     families: () => get<Family[]>("/api/metadata/families"),
     channels: () => get<Channel[]>("/api/metadata/channels"),
     saveChannel: (code: string, body: Channel) => put<Channel>(`/api/metadata/channels/${encodeURIComponent(code)}`, body),
+    eligibilityOptions: () => get<EligibilityOptions>("/api/metadata/eligibility-options"),
+    saveEligibility: (code: string, eligibility: ChannelEligibility) =>
+      put<{ channel: Channel; recompute_needed: boolean }>(`/api/metadata/channels/${encodeURIComponent(code)}/eligibility`, { eligibility }),
+    previewEligibility: (code: string, eligibility: ChannelEligibility) =>
+      post<EligibilityImpact>(`/api/metadata/channels/${encodeURIComponent(code)}/eligibility/preview`, { eligibility }),
+    brandScopes: () => get<BrandScopeDef[]>("/api/metadata/brand-scopes"),
+    saveBrandScope: (code: string, body: { label: string; enabled: boolean; rules: ScopeCondition[][] }) =>
+      put<{ scope: BrandScopeDef; recompute_needed: boolean }>(`/api/metadata/brand-scopes/${encodeURIComponent(code)}`, body),
+    deleteBrandScope: (code: string) => del<{ deleted: string }>(`/api/metadata/brand-scopes/${encodeURIComponent(code)}`),
+    previewBrandScope: (rules: ScopeCondition[][]) => post<ScopeMatches>("/api/metadata/brand-scopes/preview", { rules }),
+    recomputeEligibility: () => post<RecomputeResult>("/api/metadata/eligibility/recompute", {}),
     referenceTypes: () => get<ReferenceType[]>("/api/metadata/reference-types"),
     shotTypes: () => get<ShotType[]>("/api/metadata/shot-types"),
   },

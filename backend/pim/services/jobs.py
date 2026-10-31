@@ -18,7 +18,8 @@ JOB_ENV = {"ingest": "DATABRICKS_JOB_ID_INGEST", "air_poll": "DATABRICKS_JOB_ID_
            "package": "DATABRICKS_JOB_ID_PACKAGE", "history": "DATABRICKS_JOB_ID_HISTORY",
            "import_commit": "DATABRICKS_JOB_ID_IMPORT_COMMIT", "bulk": "DATABRICKS_JOB_ID_BULK", "rules": "DATABRICKS_JOB_ID_RULES",
            "channel_export": "DATABRICKS_JOB_ID_CHANNEL_EXPORT", "renditions": "DATABRICKS_JOB_ID_RENDITIONS",
-           "ai_bulk": "DATABRICKS_JOB_ID_AI_BULK", "ai_eval": "DATABRICKS_JOB_ID_AI_EVAL", "quality": "DATABRICKS_JOB_ID_QUALITY"}
+           "ai_bulk": "DATABRICKS_JOB_ID_AI_BULK", "ai_eval": "DATABRICKS_JOB_ID_AI_EVAL", "quality": "DATABRICKS_JOB_ID_QUALITY",
+           "readiness": "DATABRICKS_JOB_ID_READINESS"}
 
 
 def trigger_job(session: Session, kind: str, requested_by: str, params: dict) -> JobRun:
@@ -39,7 +40,7 @@ def trigger_job(session: Session, kind: str, requested_by: str, params: dict) ->
         threading.Thread(target=_inline_ingest, args=(run.id,), daemon=True).start()
         run.status = "running"
         run.started_at = utcnow()
-    elif kind in ("import_commit", "bulk", "rules", "channel_export", "renditions", "ai_bulk", "ai_eval", "quality"):
+    elif kind in ("import_commit", "bulk", "rules", "channel_export", "renditions", "ai_bulk", "ai_eval", "quality", "readiness"):
         # Locally (no job bound) the work runs inline in the request thread after commit; see the API layer.
         run.status = "running"
         run.started_at = utcnow()

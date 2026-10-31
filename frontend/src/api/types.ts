@@ -88,9 +88,61 @@ export interface Channel {
   enabled: boolean;
   requirement_set_code?: string | null;
   protected_fields: string[];
+  eligibility?: ChannelEligibility;
   config: Record<string, unknown>;
   version: number;
 }
+
+// D-15: which products a channel admits. An absent brand_scopes means every brand.
+export interface ChannelEligibility {
+  brand_scopes?: string[];
+  exclude_classifications?: string[];
+  exclude_lifecycle?: string[];
+  exclude_entity_types?: string[];
+  allow_classifications_for_subdivision?: Record<string, string[]>;
+}
+
+export interface EligibilityOptions {
+  brand_scopes: { code: string; label: string; enabled: boolean }[];
+  classifications: { code: string; label: string }[];
+  lifecycle: string[];
+  entity_types: string[];
+  fields: string[];
+  ops: string[];
+}
+
+export interface EligibilityImpact {
+  total: number;
+  eligible_now: number;
+  eligible_after: number;
+  newly_eligible: number;
+  newly_ineligible: number;
+  ineligible_reasons: { reason: string; count: number }[];
+}
+
+export interface ScopeCondition {
+  field: string;
+  op: string;
+  value: string | string[];
+}
+
+export interface BrandScopeDef {
+  code: string;
+  label: string;
+  enabled: boolean;
+  rules: ScopeCondition[][];
+  used_by: string[];
+}
+
+export interface ScopeMatches {
+  styles: number;
+  style_colors: number;
+  divisions: { division: string; style_colors: number }[];
+}
+
+export type RecomputeResult =
+  | { status: "started"; job_run_id: string }
+  | { status: "done"; scopes_changed: number; style_colors_recomputed: number };
 
 export type ReadOnlyReason = "erp" | "inherited" | "no_rights" | "deprecated";
 
