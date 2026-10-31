@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
@@ -85,6 +86,21 @@ def _family_for(meta: Metadata, row: dict) -> str | None:
         if _rule_matches(fam.erp_match, row):
             return fam.code
     return "unassigned" if "unassigned" in meta.families else None
+
+
+def _style_family(meta: Metadata, families: Iterable[str | None]) -> str | None:
+    """One family for a style from what each of its rows matched: the family most rows agree on, ties broken by rule
+    priority (lower first) then code, so the same rows always give the same family whatever order the source returns
+    them in. `unassigned` only when no row matched a family."""
+    counts = Counter(f for f in families if f and f != "unassigned")
+    if not counts:
+        return "unassigned" if "unassigned" in meta.families else None
+
+    def rank(code: str) -> tuple[int, int, str]:
+        fam = meta.families.get(code)
+        return -counts[code], (fam.erp_match or {}).get("priority", 100) if fam else 100, code
+
+    return min(counts, key=rank)
 
 
 def _normalized_style(raw: str) -> str:
@@ -275,7 +291,15 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
     # (entity id, attribute code) -> (raw value, defects it raised) of the last ERP write in this chunk
     erp_last: dict[tuple[str, str], tuple[Any, int]] = {}
 
-    for row in row_iter:
+    rows = list(row_iter)
+    matched: dict[str, list[str | None]] = {}
+    for row in rows:
+        raw_style = _s(row.get("style_number"))
+        if raw_style:
+            matched.setdefault(_normalized_style(raw_style), []).append(_family_for(meta, row))
+    style_family = {st: _style_family(meta, fams) for st, fams in matched.items()}
+
+    for row in rows:
         stats.rows += 1
         style = _s(row.get("style_number"))
         if not style:
@@ -288,7 +312,7 @@ def _ingest_rows(session: Session, meta: Metadata, change_set: Any, row_iter: It
         erp_fields = {k: row.get(k) for k in ("division", "sub_division", "brand_name", "brand_classification",
                                               "product_type", "season", "style_status") if k in row}
         scopes = evaluate_brand_scopes(erp_fields, meta.brand_scopes)
-        family = _family_for(meta, row)
+        family = style_family[style]
         cls_raw = _s(row.get("brand_classification"))
         cls_code = None
         if cls_raw:
@@ -569,7 +593,7 @@ def latest_successful_load(session: Session) -> IngestRun | None:
 
 def refresh_families(session: Session, source: SourceAdapter, all_snapshots: bool = False) -> dict[str, Any]:
     """Re-assign every loaded entity's family from the source, without loading the Style Master again. Reads only the
-    columns the family rules need, works out one family per style (a style's first non-unassigned match) and
+    columns the family rules need, works out one family per style (the family most of its rows match) and
     updates the style and all of its style-colors and SKUs in bulk.
 
     Readiness and quality are stored per style-color and depend on the family, so the style-colors that move get their
@@ -579,17 +603,14 @@ def refresh_families(session: Session, source: SourceAdapter, all_snapshots: boo
     meta = load_metadata(session, force=True)
     if hasattr(source, "wanted_columns"):
         source.wanted_columns = _family_columns(meta)
-    by_style: dict[str, str] = {}
+    matched: dict[str, list[str | None]] = {}
     rows = 0
     for row in source.read_changes():
         rows += 1
         style = _s(row.get("style_number"))
-        if not style:
-            continue
-        style = _normalized_style(style)
-        fam = _family_for(meta, row) or "unassigned"
-        if by_style.get(style, "unassigned") == "unassigned":
-            by_style[style] = fam
+        if style:
+            matched.setdefault(_normalized_style(style), []).append(_family_for(meta, row))
+    by_style = {st: _style_family(meta, fams) or "unassigned" for st, fams in matched.items()}
     styles_by_family: dict[str, list[str]] = {}
     for style, fam in by_style.items():
         styles_by_family.setdefault(fam, []).append(style)

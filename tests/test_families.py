@@ -1,10 +1,12 @@
 """Families (1.3): assigned from the Style Master's Body Type, in priority order, and refreshed without a full load."""
 
+import itertools
+
 import pytest
 from sqlalchemy import select
 
 from pim.models import ProductEntity, ReadinessSnapshot
-from pim.services.ingest import _family_for, refresh_families, run_style_master_ingest
+from pim.services.ingest import _family_for, _style_family, refresh_families, run_style_master_ingest
 
 CASES = [
     ("1 PC MISSY", "one_piece"), ("1 PC MISSY SWIMDRESS", "one_piece"), ("1PC CONTEMPORARY", "one_piece"),
@@ -117,3 +119,40 @@ def test_all_snapshots_recomputes_even_when_nothing_moves(session):
     assert refresh_families(session, source)["snapshots_refreshed"] == 0
     assert refresh_families(session, source, all_snapshots=True)["snapshots_refreshed"] == 1
     assert all(_computed(session, "750008")[c] > before[c] for c in before)
+
+
+def test_style_family_is_the_majority_and_ignores_order(meta):
+    rows = ["swim_top", "swim_top", "swim_set", "unassigned", None]
+    assert {_style_family(meta, list(p)) for p in itertools.permutations(rows)} == {"swim_top"}
+
+
+def test_a_tie_goes_to_the_family_with_the_lower_rule_priority(meta):
+    # swim_set (priority 15) beats swim_top (priority 40) at two rows each, in either order
+    assert _style_family(meta, ["swim_top", "swim_top", "swim_set", "swim_set"]) == "swim_set"
+    assert _style_family(meta, ["swim_set", "swim_set", "swim_top", "swim_top"]) == "swim_set"
+
+
+def test_unassigned_only_when_no_row_matched(meta):
+    assert _style_family(meta, ["unassigned", "unassigned"]) == "unassigned"
+    assert _style_family(meta, ["unassigned", "swim_top"]) == "swim_top"
+    assert _style_family(meta, []) == "unassigned"
+
+
+def _mixed(style, order):
+    kinds = {"a": "SWIM TOP", "b": "SWIM TOP", "c": "2 PC MISSY SET"}
+    return [{**BASE, "body_type": kinds[k], "style_number": style, "color_code": "BLK", "color_description": "BLK",
+             "size": f"S{i}", "sku": f"{style}-BLK-S{i}"} for i, k in enumerate(order)]
+
+
+def test_ingest_gives_a_mixed_style_the_same_family_in_any_row_order(session):
+    for n, order in enumerate(itertools.permutations("abc")):
+        style = f"7600{n:02d}"
+        run_style_master_ingest(session, NoSource(), rows=_mixed(style, order))
+        assert set(_families(session, style).values()) == {"swim_top"}, order
+
+
+def test_refresh_gives_a_mixed_style_the_same_family_in_any_row_order(session):
+    run_style_master_ingest(session, NoSource(), rows=_rows("760100"))
+    for order in itertools.permutations("abc"):
+        refresh_families(session, RowsSource(_mixed("760100", order)))
+        assert set(_families(session, "760100").values()) == {"swim_top"}, order
