@@ -1,5 +1,5 @@
 // 1.3 metadata layer, RBAC-02, IMP-11, GOV-01, GOV-03, GOV-04, GOV-07, AI-02: Admin with sub-tabs for attributes,
-// groups, option lists, families, channels, user roles, rules, AI (brand voice and prompt templates), quality,
+// groups, option lists, families, channels, brand scopes, user roles, rules, AI (brand voice and prompt templates), quality,
 // ERP defects, attribute usage, and telemetry.
 
 import { useNavigate, useParams } from "react-router-dom";
@@ -8,6 +8,7 @@ import { AttributesTab } from "../admin/Attributes";
 import { GroupsTab, FamiliesTab } from "../admin/Groups";
 import { OptionListsTab } from "../admin/OptionLists";
 import { ChannelsTab } from "../admin/Channels";
+import { BrandScopesTab } from "../admin/BrandScopes";
 import { UserRolesTab } from "../admin/UserRoles";
 import { ErpDefectsTab, AttributeUsageTab } from "../admin/Reports";
 import { TelemetryTab } from "../admin/Telemetry";
@@ -21,6 +22,7 @@ const TABS = [
   { key: "option-lists", label: "Option lists" },
   { key: "families", label: "Families" },
   { key: "channels", label: "Channels" },
+  { key: "brand-scopes", label: "Brand scopes" },
   { key: "user-roles", label: "User roles" },
   { key: "rules", label: "Rules" },
   { key: "ai", label: "AI" },
@@ -47,6 +49,7 @@ export function AdminPage() {
       {active === "option-lists" && <OptionListsTab />}
       {active === "families" && <FamiliesTab />}
       {active === "channels" && <ChannelsTab />}
+      {active === "brand-scopes" && <BrandScopesTab />}
       {active === "user-roles" && <UserRolesTab />}
       {active === "rules" && <RulesTab />}
       {active === "ai" && <AiAdminTab />}

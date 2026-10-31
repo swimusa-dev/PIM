@@ -316,6 +316,24 @@ resources:
         - {name: job_run_id, default: ""}
       max_concurrent_runs: 1
 
+    pim_readiness_refresh:
+      name: "[PIM] Apply eligibility changes (D-15)"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - -r ${workspace.file_path}/requirements.txt
+      tasks:
+        - task_key: readiness
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.file_path}/backend/pim/jobs/run_readiness.py
+            parameters: *conn
+      parameters:
+        - {name: job_run_id, default: ""}
+      max_concurrent_runs: 1
+
     pim_quality_score:
       name: "[PIM] Data quality score (GOV-03)"
       schedule:

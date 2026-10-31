@@ -110,6 +110,11 @@ resources:
           job:
             id: ${resources.jobs.pim_quality_score.id}
             permission: CAN_MANAGE_RUN
+        - name: readiness-job
+          description: Apply eligibility and brand scope changes (D-15)
+          job:
+            id: ${resources.jobs.pim_readiness_refresh.id}
+            permission: CAN_MANAGE_RUN
         - name: bootstrap-job
           description: Alembic upgrade and seed load
           job:

@@ -54,6 +54,8 @@ env:
     valueFrom: ai-eval-job
   - name: DATABRICKS_JOB_ID_QUALITY
     valueFrom: quality-job
+  - name: DATABRICKS_JOB_ID_READINESS
+    valueFrom: readiness-job
   # AI-01: model per task from config; Unity Gateway endpoints with usage tracking and inference tables (D19).
   - name: PIM_AI_ENDPOINT_COPY
     value: "databricks-claude-sonnet-4-5"

@@ -205,6 +205,15 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    bootstrap alone clears the matching SKUs' size flags and defects. No ingest re-run is needed.
 4. Unpause the ingest schedule in the job's UI (every 2 hours by default) once the load is correct. The app header
    shows the last successful load and warns when it is older than `PIM_ERP_STALE_THRESHOLD_HOURS` (26).
+5. Set which brands go to which channels (D-15), in the app, as a PIM Admin:
+   - **Admin > Brand scopes**: a brand scope is a rule over division, brand and other ERP fields (a scope matches when any
+     of its rules does; a rule matches when all its conditions do). Preview shows how many style-colors a rule matches.
+   - **Admin > Channels > Eligibility**: choose the brand scopes a channel admits (or every brand) and what it never
+     sends (classifications, lifecycle status, prepacks). Preview impact shows how many style-colors would become
+     eligible before you save.
+   - After either change, use **Apply to loaded products**. It runs the `[PIM] Apply eligibility changes (D-15)` job,
+     which re-derives every product's brand scopes from its stored ERP fields and recomputes channel readiness and
+     quality (a few minutes for the full catalog). No Style Master load is needed.
 
 Column names: `seeds/attributes.yml` maps ERP attributes to Style Master columns through `erp_column`, using
 the names seen in the Image Relay export and the VAS request sheet, normalized to lower snake case. Compare
