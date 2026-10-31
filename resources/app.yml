@@ -8,6 +8,10 @@ resources:
       # compute_size is UNCONFIRMED on the compliance-profile workspace; PLT-00 step 1 records the answer.
       # Uncomment once confirmed:
       # compute_size: ${var.app_compute_size}
+      # A Databricks App can have at most 20 resources (the deploy fails with "Number of app resources must be less
+      # than or equal to 20"), and this app uses all 20. tests/test_app_bundle.py checks the count and that every
+      # resource is injected in app.yaml. To add one, free a slot first or fold a job into an existing one. The
+      # bootstrap job is not an app resource: nothing in the app runs it, it is run with `databricks bundle run`.
       resources:
         - name: lakebase
           description: Lakebase instance holding PIM working data (ARC-02)
@@ -114,11 +118,6 @@ resources:
           description: Apply eligibility and brand scope changes (D-15)
           job:
             id: ${resources.jobs.pim_readiness_refresh.id}
-            permission: CAN_MANAGE_RUN
-        - name: bootstrap-job
-          description: Alembic upgrade and seed load
-          job:
-            id: ${resources.jobs.pim_bootstrap.id}
             permission: CAN_MANAGE_RUN
       # OBO user authorization scopes (PLT-00 step 2). iam.access-control:read and iam.current-user:read are added
       # by Databricks to every app and are rejected if listed here. Enable on the app in the UI as well.
