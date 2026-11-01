@@ -203,8 +203,10 @@ No file in the bundle may exceed 10 MB [D1]; the frontend bundle is about 0.5 MB
    `seeds/value_mappings.yml` (then re-run bootstrap) or in Admin > Option lists, and re-run the ingest.
    Size values are the exception: after adding a value to a size scale in `seeds/option_lists.yml`, re-running
    bootstrap alone clears the matching SKUs' size flags and defects. No ingest re-run is needed.
-4. Unpause the ingest schedule in the job's UI (every 2 hours by default) once the load is correct. The app header
-   shows the last successful load and warns when it is older than `PIM_ERP_STALE_THRESHOLD_HOURS` (26).
+4. The ingest schedule (every 2 hours, `resources/jobs.yml`) is unpaused in the bundle once the load is correct. Set it
+   there, not with the toggle in the job's UI: a development target pauses every schedule on each deploy unless the
+   job's own `pause_status` says `UNPAUSED`, so a UI toggle is undone by the next deploy. The app header shows the last
+   successful load and warns when it is older than `PIM_ERP_STALE_THRESHOLD_HOURS` (26).
 5. Set which brands go to which channels (D-15), in the app, as a PIM Admin:
    - **Admin > Brand scopes**: a brand scope is a rule over division, brand and other ERP fields (a scope matches when any
      of its rules does; a rule matches when all its conditions do). Preview shows how many style-colors a rule matches.
