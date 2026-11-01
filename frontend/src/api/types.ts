@@ -1859,3 +1859,11 @@ export interface AdapterErrorRate {
   last_error_at?: string | null;
   last_error?: string | null;
 }
+
+export interface ApplyStatus {
+  status: "never" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "unknown";
+  started_at?: string | null;
+  finished_at?: string | null;
+  style_colors_recomputed?: number | null;
+  error?: string | null;
+}

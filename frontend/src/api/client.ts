@@ -123,6 +123,7 @@ import type {
   RollbackResult,
 } from "./types";
 import type {
+  ApplyStatus,
   BrandScopeDef,
   ChannelEligibility,
   EligibilityImpact,
@@ -211,6 +212,7 @@ export const api = {
       put<{ scope: BrandScopeDef; recompute_needed: boolean }>(`/api/metadata/brand-scopes/${encodeURIComponent(code)}`, body),
     deleteBrandScope: (code: string) => del<{ deleted: string }>(`/api/metadata/brand-scopes/${encodeURIComponent(code)}`),
     previewBrandScope: (rules: ScopeCondition[][]) => post<ScopeMatches>("/api/metadata/brand-scopes/preview", { rules }),
+    applyStatus: () => get<ApplyStatus>("/api/metadata/eligibility/apply-status"),
     recomputeEligibility: () => post<RecomputeResult>("/api/metadata/eligibility/recompute", {}),
     referenceTypes: () => get<ReferenceType[]>("/api/metadata/reference-types"),
     shotTypes: () => get<ShotType[]>("/api/metadata/shot-types"),

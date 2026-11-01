@@ -197,3 +197,24 @@ def test_bootstrap_still_creates_a_seeded_channel_and_scope_that_is_missing(clie
     session.expire_all()
     assert session.get(BrandScope, "ralph_lauren_swim") is not None
 
+
+
+def test_apply_status_says_never_then_reports_the_last_apply(client):
+    assert client.get("/api/metadata/eligibility/apply-status", headers=VIEWER).json() == {"status": "never"}
+    assert client.post("/api/metadata/eligibility/recompute", headers=ADMIN).status_code == 200
+    status = client.get("/api/metadata/eligibility/apply-status", headers=VIEWER).json()
+    assert status["status"] == "succeeded" and status["style_colors_recomputed"] > 0 and status["finished_at"]
+
+
+def test_a_run_that_never_reported_back_is_not_called_running(client, session):
+    from datetime import timedelta
+
+    from pim.models import JobRun
+    from pim.models._common import utcnow
+
+    session.add(JobRun(kind="readiness", status="running", requested_by="x", started_at=utcnow() - timedelta(hours=3)))
+    session.commit()
+    assert client.get("/api/metadata/eligibility/apply-status", headers=ADMIN).json()["status"] == "unknown"
+    session.add(JobRun(kind="readiness", status="running", requested_by="x", started_at=utcnow()))
+    session.commit()
+    assert client.get("/api/metadata/eligibility/apply-status", headers=ADMIN).json()["status"] == "running"

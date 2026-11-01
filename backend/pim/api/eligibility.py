@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ from sqlalchemy import select
 
 from pim.api.deps import CurrentUser, Metadata, Session, get_current_user, get_meta, get_session
 from pim.api.serializers import channel_out
-from pim.models import BrandScope, Channel
+from pim.models import BrandScope, Channel, JobRun
 from pim.models._common import utcnow
 from pim.services import eligibility as svc
 from pim.services.metadata import invalidate, load_metadata
@@ -142,6 +143,20 @@ def preview_scope(body: RulesBody, session: Session = Depends(get_session), user
     except svc.EligibilityError as exc:
         raise HTTPException(422, str(exc)) from exc
     return svc.scope_matches(session, rules)
+
+
+@router.get("/eligibility/apply-status")
+def apply_status(session: Session = Depends(get_session), user: CurrentUser = Depends(get_current_user)) -> dict:
+    """The latest Apply to loaded products run started from the app, so the screens can say when it last ran."""
+    run = session.execute(select(JobRun).where(JobRun.kind == "readiness").order_by(JobRun.created_at.desc()).limit(1)).scalar_one_or_none()
+    if run is None:
+        return {"status": "never"}
+    status = run.status
+    if status in ("queued", "running") and utcnow() - (run.started_at or run.created_at) > timedelta(hours=2):
+        status = "unknown"  # the job never reported back (it may have been stopped); do not claim it is still running
+    iso = lambda d: d.isoformat() if d else None  # noqa: E731
+    return {"status": status, "started_at": iso(run.started_at or run.created_at), "finished_at": iso(run.finished_at),
+            "style_colors_recomputed": (run.report or {}).get("style_colors_recomputed"), "error": run.error}
 
 
 @router.post("/eligibility/recompute")
