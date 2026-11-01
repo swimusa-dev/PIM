@@ -8,7 +8,7 @@ import { api } from "../api/client";
 import { isAdmin, useMe } from "../api/hooks";
 import type { BrandScopeDef, ScopeMatches } from "../api/types";
 import { Badge, Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
-import { RecomputeButton } from "./Eligibility";
+import { ApplyBar } from "./Eligibility";
 
 interface Cond {
   field: string;
@@ -67,14 +67,7 @@ export function BrandScopesTab() {
           </button>
         )}
       </div>
-      {needsApply && admin && (
-        <div className="panel">
-          <div className="panel-body row" style={{ justifyContent: "space-between" }}>
-            <span className="small">Changes to a scope apply to the products already loaded once you apply them. Readiness is recomputed too.</span>
-            <RecomputeButton primary onDone={() => setNeedsApply(false)} />
-          </div>
-        </div>
-      )}
+      {admin && <ApplyBar pending={needsApply} onDone={() => setNeedsApply(false)} />}
       {scopes.data!.length === 0 ? (
         <Empty title="No brand scopes">Add one to group products by division or brand.</Empty>
       ) : (

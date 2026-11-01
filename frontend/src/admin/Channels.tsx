@@ -5,14 +5,15 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { useChannels } from "../api/hooks";
+import { isAdmin, useChannels, useMe } from "../api/hooks";
 import type { Channel } from "../api/types";
 import { Badge, Dialog, Empty, ErrorBox, Spinner, useToast } from "../components/Common";
 import { ChannelEditor } from "./ChannelEditor";
-import { EligibilityDialog, RecomputeButton } from "./Eligibility";
+import { ApplyBar, EligibilityDialog } from "./Eligibility";
 
 export function ChannelsTab() {
   const channels = useChannels();
+  const admin = isAdmin(useMe().data);
   const qc = useQueryClient();
   const toast = useToast();
   const [editing, setEditing] = useState<Channel | null>(null);
@@ -48,14 +49,7 @@ export function ChannelsTab() {
           Add channel
         </button>
       </div>
-      {needsApply && (
-        <div className="panel mb8">
-          <div className="panel-body row" style={{ justifyContent: "space-between" }}>
-            <span className="small">Eligibility changed. Apply it to the products already loaded to update channel readiness.</span>
-            <RecomputeButton primary onDone={() => setNeedsApply(false)} />
-          </div>
-        </div>
-      )}
+      {admin && <ApplyBar pending={needsApply} onDone={() => setNeedsApply(false)} />}
       {channels.data!.length === 0 ? (
         <Empty title="No channels">Add Shopify first; retailer and marketplace channels follow.</Empty>
       ) : (

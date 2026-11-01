@@ -22,6 +22,7 @@ export function RecomputeButton({ primary, onDone }: { primary?: boolean; onDone
         "ok",
       );
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["metadata", "apply-status"] });
       qc.invalidateQueries({ queryKey: ["products"], refetchType: "none" });
       qc.invalidateQueries({ queryKey: ["product"], refetchType: "none" });
       onDone?.();
@@ -37,6 +38,33 @@ export function RecomputeButton({ primary, onDone }: { primary?: boolean; onDone
     >
       {run.isPending ? "Applying" : "Apply to loaded products"}
     </button>
+  );
+}
+
+// Always shown on the Channels and Brand scopes tabs (PIM Admin only): the button that applies a change to the loaded
+// products, and when it last ran. `pending` is true right after a change was saved and not yet applied.
+export function ApplyBar({ pending, onDone }: { pending?: boolean; onDone?: () => void }) {
+  const status = useQuery({
+    queryKey: ["metadata", "apply-status"],
+    queryFn: api.metadata.applyStatus,
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 10000 : false),
+  });
+  const d = status.data;
+  const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "");
+  let text = "Applying recomputes every product's brand scopes and channel readiness (about two minutes).";
+  if (pending) text = "Changes saved. Apply them to update channel readiness on the products already loaded.";
+  else if (d?.status === "running" || d?.status === "queued") text = `Applying now (started ${when(d.started_at)}). Readiness updates when it finishes.`;
+  else if (d?.status === "succeeded") text = `Last applied ${when(d.finished_at)}${d.style_colors_recomputed ? `, ${n(d.style_colors_recomputed)} style-colors recomputed` : ""}.`;
+  else if (d?.status === "failed") text = `The last apply failed${d.error ? `: ${d.error}` : ""}. Try again.`;
+  else if (d?.status === "unknown") text = "The last apply never reported back. Apply again to be sure.";
+  else if (d?.status === "never") text = "Not applied from the app yet. " + text;
+  return (
+    <div className="panel mb8">
+      <div className="panel-body row" style={{ justifyContent: "space-between" }}>
+        <span className="small">{text}</span>
+        <RecomputeButton primary={!!pending} onDone={onDone} />
+      </div>
+    </div>
   );
 }
 
