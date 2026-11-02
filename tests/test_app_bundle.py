@@ -35,3 +35,10 @@ def test_every_job_the_app_can_start_is_a_bound_resource():
 
     env = set(re.findall(r"-\s*name:\s*(DATABRICKS_JOB_ID_\w+)", (ROOT / "app.yaml").read_text()))
     assert set(JOB_ENV.values()) <= env, f"jobs the app starts but app.yaml does not inject: {sorted(set(JOB_ENV.values()) - env)}"
+
+
+def test_the_ingest_schedule_stays_on_after_a_deploy():
+    """A development target pauses every schedule on deploy unless the job itself says UNPAUSED."""
+    jobs = yaml.safe_load((ROOT / "resources" / "jobs.yml").read_text())["resources"]["jobs"]
+    assert jobs["pim_style_master_ingest"]["schedule"]["pause_status"] == "UNPAUSED"
+

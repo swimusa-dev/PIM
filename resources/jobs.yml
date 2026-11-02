@@ -38,7 +38,10 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 */2 * * ?"
         timezone_id: America/New_York
-        pause_status: PAUSED
+        # Unpaused here, not in the job's UI: a development target pauses every schedule on each deploy unless the job
+        # says otherwise, so a toggle in the UI would be undone by the next deploy. The load is incremental (about five
+        # minutes when little changed) and runs one at a time.
+        pause_status: UNPAUSED
       environments:
         - environment_key: default
           spec:
