@@ -177,6 +177,18 @@ def seed_all(session: Session, seed_dir: Path | None = None) -> dict[str, int]:
     for src in _load("import_sources.yml").get("import_sources", []):
         _upsert(session, ImportSource, "code", src)
 
+    # Saved import templates: created once, never overwritten, so edits made in the Import screen stay
+    from pim.models import MappingTemplate
+
+    for tpl in _load("import_templates.yml").get("import_templates", []):
+        exists = session.execute(select(MappingTemplate).where(
+            MappingTemplate.source_code == tpl["source_code"], MappingTemplate.name == tpl["name"])).scalar_one_or_none()
+        if exists is None:
+            session.add(MappingTemplate(name=tpl["name"], source_code=tpl["source_code"], structure_signature=tpl["structure_signature"],
+                                        level=tpl.get("level", "style_color"), columns=tpl.get("columns", []),
+                                        match_keys=tpl.get("match_keys", []), unmatched_policy=tpl.get("unmatched_policy", "update_only"),
+                                        created_by="seed"))
+
     # Placeholders
     for p in _load("placeholders.yml").get("placeholders", []):
         p["token"] = p["token"].strip().lower()

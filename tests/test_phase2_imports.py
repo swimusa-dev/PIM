@@ -369,3 +369,83 @@ def test_files_endpoint_validates_and_returns_batch(session, ingested):
     assert client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": 99}]}, headers=H).status_code == 400
     ok = client.put(f"/api/imports/batches/{b['id']}/files", json={"files": [{"index": 0, "header_row": 2, "data_start_row": 4}]}, headers=H).json()
     assert ok["files"][0]["rows"] == 2 and ok["files"][0]["data_start_row"] == 4
+
+
+# ---- Shopify product export template and Active-only filter ------------------------------------------------------------
+def _shopify_workbook() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Handle", "Status", "Top Row", "Variant SKU", "Title", "Body HTML", "Tags", "Category: Name",
+               "Metafield: title_tag [string]", "Metafield: custom.title_tag [string]",
+               "Metafield: custom.filter_coverage [single_line_text_field]"])
+    ws.append(["skylar-pink", "Active", True, "200809-FVP-XS", "Skylar Top - Festival Pink", "<p>Soft bralette.</p>", "bras, pink", "Swimwear", None, "Skylar Top Pink", "Full"])
+    ws.append(["skylar-pink", "Active", None, "200809-FVP-S", None, None, None, None, None, None, None])
+    ws.append(["skylar-black", "Draft", True, "200809-ECB-XS", "Skylar Top - Black (draft copy)", "<p>Draft.</p>", "bras", "Swimwear", "Draft SEO", None, None])
+    ws.append(["unknown", "Active", True, "999999-ZZZ-XS", "Not in the PIM", None, None, None, None, None, None])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _seeded_template(session):
+    from pim.db.seed import seed_all
+    from pim.models import MappingTemplate
+
+    seed_all(session)
+    session.flush()
+    return session.execute(select(MappingTemplate).where(MappingTemplate.source_code == "shopify")).scalar_one()
+
+
+def test_row_excluded_by_only_values():
+    from pim.imports.validation import row_excluded
+
+    mapping = [{"target": "_status", "sources": ["Status"], "only_values": ["Active"]}]
+    assert row_excluded({"_status": "Active"}, mapping) is None
+    assert row_excluded({"_status": " active "}, mapping) is None
+    assert "Draft" in row_excluded({"_status": "Draft"}, mapping)
+    assert "empty" in row_excluded({"_status": None}, mapping)
+    assert row_excluded({"_status": "Draft"}, [{"target": "_status", "sources": ["Status"]}]) is None
+
+
+def test_seeded_shopify_template_imports_active_products_only(session, meta, admin, ingested, tmp_path):
+    tpl = _seeded_template(session)
+    assert tpl.structure_signature and tpl.match_keys == ["style_color", "sku"] and tpl.level == "style_color"
+    seed_again = _seeded_template(session)
+    assert seed_again.id == tpl.id  # seeded once by name, never duplicated
+    batch = create_batch(session, admin, "shopify", "style_color")
+    add_file(session, meta, batch, "export.xlsx", _shopify_workbook(), Storage(str(tmp_path)))
+    from pim.imports.batches import apply_template
+
+    apply_template(batch, tpl)
+    set_mapping(session, meta, batch, batch.mapping, batch.match_keys, {}, tpl.id, None)
+    save_value_mappings(session, "shopify", [{"list_code": "coverage", "raw": "Full", "option_code": "full"}], admin.email)
+    stats = validate_batch(session, meta, batch)
+    assert stats["excluded"] == 1
+    rows = {r.row_number: r for r in batch.rows}
+    first, second, draft, unknown = (rows[k] for k in sorted(rows))
+    assert first.mapped["style_number"] == "200809" and first.mapped["color_code"] == "FVP"
+    assert first.mapped["product_title"] == "Skylar Top - Festival Pink" and first.mapped["seo_title"] == "Skylar Top Pink"  # fallback column
+    assert first.mapped["shopify_category"] == "Swimwear" and first.mapped["coverage"] == "full"
+    assert draft.action == "skip" and draft.mapped == {"_excluded": draft.mapped["_excluded"]} and draft.errors == []
+    match = match_batch(session, meta, batch)
+    assert match["excluded"] == 1 and match["matched"] == 2 and match["unmatched"] == 1
+    assert draft.match_status == "excluded" and first.entity_id == _sc(session, "200809", "FVP").id
+    assert unknown.action == "skip" and unknown.match_status == "unmatched"
+    diff = review_batch(session, meta, batch)
+    assert any("Left out" in s["reason"] for s in diff["skipped"] if s["row_number"] == draft.row_number)
+    commit_batch(session, meta, admin, batch)
+    assert _pv(session, _sc(session, "200809", "FVP"), "product_title").value_text == "Skylar Top - Festival Pink"
+    assert _pv(session, _sc(session, "200809", "ECB"), "product_title") is None  # the Draft row never wrote
+
+
+def test_seeded_template_signature_matches_the_real_export_layout():
+    """The signature in seeds/import_templates.yml is the hash of the Vitamin A products export header, so that file
+    layout gets the template on upload. A different layout is chosen by hand."""
+    from pathlib import Path
+
+    import yaml
+
+    seed = yaml.safe_load((Path(__file__).parent.parent / "seeds" / "import_templates.yml").read_text())["import_templates"][0]
+    sources = {t for c in seed["columns"] for t in c["sources"]}
+    assert "Variant SKU" in sources and "Status" in sources
+    assert [c for c in seed["columns"] if c["target"] == "_status"][0]["only_values"] == ["Active"]

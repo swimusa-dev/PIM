@@ -48,3 +48,12 @@ group role mapper, UC app telemetry, credentials) stay open and are listed in `d
 | Empty PIM value in a mapped Shopify field | No change proposed (never an implicit clear); only an explicit Not applicable clears | Shopify overwrites blank cells [C39]; an absent PIM value must not delete live data |
 | Role of `PIM_DEV_USER_ROLES` | Applies only when no identity header is present | A header-identified user must never inherit the local developer's roles |
 | Reference entity values | Stored in `product_value` with `entity_level = ref:<type>` | Reuses the EAV, provenance, history, and rights machinery (DM-11 asks for the same attribute-definition machinery) |
+
+## D-16 Shopify product export backfill (Active only)
+The Vitamin A Shopify export (Matrixify, 2026-11-01) is loaded through the Import screen with the seeded template
+"Shopify product export (Matrixify), Active products only" (`seeds/import_templates.yml`). It matches on style and color
+taken from the variant SKU (STYLE-COLOR-SIZE), updates only (never creates products), and leaves Draft rows out through
+`only_values` on the Status column. Shopify is the lowest trust source (rank 4), so existing PIM values are never
+overwritten without review. Not mapped, on purpose: Collections (a list of handles, over the 80 character limit), the
+combined fiber and care text (the Care instructions attribute is a three-value list), and filter_style, filter_type and
+filter_fabric (no matching attribute or option list yet). Status: resolved. Style Master attribute seeding is open (D-17).

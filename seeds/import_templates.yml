@@ -1,0 +1,29 @@
+# Saved import mapping templates (IMP-02). Seeded once by name: a template already in the database is never overwritten,
+# so edits made in the Import screen stay. structure_signature is the hash of the file's header names (see
+# pim.imports.parsers.structure_signature); a file with that exact layout gets the template applied on upload, and any
+# template can also be chosen by hand on the Map step.
+import_templates:
+  - name: Shopify product export (Matrixify), Active products only
+    source_code: shopify
+    structure_signature: af8d4109ebd94c0c   # the Vitamin A products export of 2026-11-01, 697 columns, header on row 1
+    level: style_color
+    unmatched_policy: update_only
+    match_keys: [style_color, sku]
+    columns:
+      # Variant SKUs look like STYLE-COLOR-SIZE (6259613-BLK-S/M); the style and color come from the first two parts.
+      - {target: style_number, sources: [Variant SKU], transforms: [{op: regex_extract, args: {pattern: "^([^-]+)-", group: 1}}]}
+      - {target: color_code, sources: [Variant SKU], transforms: [{op: regex_extract, args: {pattern: "^[^-]+-([^-]+)", group: 1}}]}
+      - {target: sku, sources: [Variant SKU], transforms: []}
+      # Only rows whose Status is Active are imported; Draft and Archived rows are left out.
+      - {target: _status, sources: [Status], transforms: [], only_values: [Active]}
+      - {target: product_title, sources: [Title], transforms: [{op: trim, args: {}}]}
+      - {target: product_description, sources: [Body HTML], transforms: []}
+      # Shopify keeps SEO text in two column spellings; the second is the fallback when the first is empty.
+      - {target: seo_title, sources: ["Metafield: title_tag [string]"], transforms: []}
+      - {target: seo_title, sources: ["Metafield: custom.title_tag [string]"], transforms: []}
+      - {target: seo_description, sources: ["Metafield: description_tag [string]"], transforms: []}
+      - {target: seo_description, sources: ["Metafield: custom.description_tag [string]"], transforms: []}
+      - {target: fit_details, sources: ["Metafield: custom.fit_details [multi_line_text_field]"], transforms: []}
+      - {target: shopify_tags, sources: [Tags], transforms: []}
+      - {target: shopify_category, sources: ["Category: Name"], transforms: []}
+      - {target: coverage, sources: ["Metafield: custom.filter_coverage [single_line_text_field]"], transforms: []}
