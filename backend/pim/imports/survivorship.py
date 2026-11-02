@@ -101,7 +101,7 @@ def review_batch(session: Session, meta: Metadata, batch: ImportBatch) -> dict[s
     for row in batch.rows:
         if row.action == "skip":
             skipped.append({"row_number": row.row_number, "file_index": row.file_index,
-                            "reason": "; ".join(e["message"] for e in row.errors) or f"{row.match_status} and policy does not allow create"})
+                            "reason": "; ".join(e["message"] for e in row.errors) or (row.warnings[0]["message"] if row.match_status == "excluded" and row.warnings else f"{row.match_status} and policy does not allow create")})
             continue
         if row.action == "create":
             key = f"{row.mapped.get('style_number')}-{row.mapped.get('color_code')}-{row.mapped.get('size') or ''}"

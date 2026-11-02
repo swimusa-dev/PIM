@@ -28,6 +28,20 @@ def value_mappings_for(session: Session, source_code: str, list_code: str) -> di
     return {r.raw_normalized: r.option_code for r in rows}
 
 
+def row_excluded(mapped: dict[str, Any], mapping: list[dict]) -> str | None:
+    """A mapping entry with `only_values` keeps a row only when that column holds one of the values (not case
+    sensitive), for example Status = Active in a Shopify export. Returns why the row is left out, or None."""
+    for m in mapping:
+        allowed = m.get("only_values")
+        if not allowed or m.get("skip") or not m.get("target"):
+            continue
+        got = str(mapped.get(m["target"]) or "").strip()
+        if got.lower() not in {str(v).strip().lower() for v in allowed}:
+            col = (m.get("sources") or [m["target"]])[0]
+            return f"Left out: {col} is {got or 'empty'}, only {', '.join(map(str, allowed))} rows are imported"
+    return None
+
+
 def validate_batch(session: Session, meta: Metadata, batch: ImportBatch) -> dict[str, Any]:
     on_error = (batch.options or {}).get("on_error", "skip_value")
     required = [m.get("target") for m in (batch.mapping or []) if m.get("required") and m.get("target")]
@@ -41,6 +55,13 @@ def validate_batch(session: Session, meta: Metadata, batch: ImportBatch) -> dict
         mapped = map_row(row.raw, batch.mapping or [])
         if row.mapped.get("_pim_id"):
             mapped["_pim_id"] = row.mapped["_pim_id"]
+        excluded = row_excluded(mapped, batch.mapping or [])
+        if excluded:
+            row.mapped, row.action = {"_excluded": excluded}, "skip"
+            row.match_status, row.entity_id = "excluded", None
+            row.warnings = [{"message": excluded}]
+            stats["excluded"] = stats.get("excluded", 0) + 1
+            continue
         clean: dict[str, Any] = {}
         for target, raw_val in mapped.items():
             if target in CORE_KEYS or target.startswith("_"):

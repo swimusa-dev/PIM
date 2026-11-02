@@ -107,6 +107,10 @@ def match_batch(session: Session, meta: Metadata, batch: ImportBatch) -> dict[st
     keyless_col = (batch.options or {}).get("keyless_name_column")
     stats = {"matched": 0, "new": 0, "ambiguous": 0, "unmatched": 0}
     for row in batch.rows:
+        if row.mapped.get("_excluded"):
+            row.action, row.match_status = "skip", "excluded"
+            stats["excluded"] = stats.get("excluded", 0) + 1
+            continue
         if row.action == "skip" and row.errors:
             continue
         if row.entity_id and (row.decided_by or row.match_key_used in ("worksheet", "assisted")):
