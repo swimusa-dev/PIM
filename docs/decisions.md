@@ -57,3 +57,13 @@ taken from the variant SKU (STYLE-COLOR-SIZE), updates only (never creates produ
 overwritten without review. Not mapped, on purpose: Collections (a list of handles, over the 80 character limit), the
 combined fiber and care text (the Care instructions attribute is a three-value list), and filter_style, filter_type and
 filter_fabric (no matching attribute or option list yet). Status: resolved. Style Master attribute seeding is open (D-17).
+
+## D-17 Style Master attribute seeding dropped; Underwire seeded from the Image Relay merge view
+Measured against Databricks on 2026-11-02: the view the PIM ingests (`vw_image_relay_export_style_master`) holds no
+Vitamin A attribute data (NECKLINE, Care Instructions, CUSTOMER FACING DESCRIPTION and the others are empty), so no
+Style Master columns are mapped to PIM-owned attributes. The merge view (`vw_ir_stylemaster_merge`) fills several
+columns for every Vitamin A row with one default (Sport/Activity swimming, Impact Level Medium, Fit Slim, Hand Wash Cold,
+Line Dry, Lined N), which are not facts about each product and are not loaded. Underwire is real (every YES row names an
+underwire in its description) and is seeded by `seeds/attribute_seeds.yml`: only where empty, one reversible change set,
+styles whose colors disagree skipped. Print Category is not seeded (undefined for two thirds, values do not fit the list,
+and the list belongs to Print reference entities). Status: resolved.

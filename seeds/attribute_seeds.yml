@@ -1,0 +1,19 @@
+# One-time fills of PIM-owned attributes from a warehouse view, run by the job "[PIM] Seed attributes from Image Relay".
+# A seed only fills a value that is empty (never overwrites a person's edit or an earlier import), writes it as an
+# import with its source named, and is one reversible change set. Where the colors of a style disagree the style is
+# skipped and counted. A value not listed in value_map is skipped and counted.
+#
+# Print Category is deliberately not seeded: the view leaves it undefined for two thirds of Vitamin A, its values
+# (PRINT, SOLIDNOVELTY, NR) do not match the Print category list (floral, geometric, solid, stripe), and that list
+# belongs to Print reference entities, not to products.
+attribute_seeds:
+  - code: underwire_from_image_relay
+    label: Underwire from the Image Relay merge view (Vitamin A)
+    table: swim_data_whse.image_relay_view.vw_ir_stylemaster_merge
+    key_column: "Style #"
+    value_column: "Underwire? Y/N"
+    filter: {column: "Division Name", equals: "VITAMIN A"}
+    attribute: underwire
+    level: style
+    source_ref: image_relay_merge
+    value_map: {"YES": true, "NO": false, "N/A": "__NOT_APPLICABLE__"}
