@@ -53,7 +53,7 @@ attributes:
 
   # ---- SEO -------------------------------------------------------------------------------------
   - {code: seo_title, label: SEO title, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 70}, channel_scopable: true}
-  - {code: seo_description, label: SEO meta description, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 160}, channel_scopable: true}
+  - {code: seo_description, label: SEO meta description, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: confirmed, owner_role: ecommerce, validation: {max_length: 300}, channel_scopable: true}
   - {code: seo_keywords, label: SEO keywords, data_type: text, level: style_color, group_code: seo, source_of_truth: pim, status: proposed, validation: {max_length: 300}}
 
   # ---- Copy ------------------------------------------------------------------------------------
