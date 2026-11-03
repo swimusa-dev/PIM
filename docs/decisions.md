@@ -67,3 +67,8 @@ Line Dry, Lined N), which are not facts about each product and are not loaded. U
 underwire in its description) and is seeded by `seeds/attribute_seeds.yml`: only where empty, one reversible change set,
 styles whose colors disagree skipped. Print Category is not seeded (undefined for two thirds, values do not fit the list,
 and the list belongs to Print reference entities). Status: resolved.
+
+## D-18 SEO meta description limit raised to 300 characters
+The Shopify export carries SEO descriptions up to about 780 characters, and 504 of the 546 filled Active rows were over
+the old 160 character limit. The limit is now 300 on the attribute and on the Shopify channel readiness rule. The AI
+drafting prompt (`vita_seo_description`) still asks for at most 160, so new copy stays short. Status: resolved.

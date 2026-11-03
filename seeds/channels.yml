@@ -10,7 +10,7 @@ requirement_sets:
       - {attribute_code: fabric, required: true}
       - {attribute_code: care_instructions, required: false}
       - {attribute_code: seo_title, required: true, max_length: 70}
-      - {attribute_code: seo_description, required: true, max_length: 160}
+      - {attribute_code: seo_description, required: true, max_length: 300}
       - {shot_type: front, required: true}
       - {shot_type: back, required: true}
       - {shot_type: on_model_front, required: true}
