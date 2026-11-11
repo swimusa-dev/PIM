@@ -117,10 +117,11 @@ the channel export rules: approved only, no drafts, no unconfirmed defaults, and
 cd backend && python -m pim.cli setup-file --fill ../VA_Resort_2027_Setup_File.xlsx --out ../VA_Resort_2027_PIM.xlsx
 ```
 
-The column-to-attribute map is `COLUMNS` in `backend/pim/export/setup_file.py`. HTS Number, Wholesale $, Fit Scale #
-and the six measurement columns read attribute codes the seeds do not define yet (`hts_number`, `wholesale_price`,
-`fit_scale`, `inseam`, `front_rise`, `back_rise`, `cfl_length`, `hps_length`, `strap_length`). They fill as soon as
-an admin adds attributes with those codes. API: `POST /api/setup-file` (JSON `styles`, `entity_ids` or `view_id`) and
+The column-to-attribute map is `COLUMNS` in `backend/pim/export/setup_file.py`. Every setup file column has a PIM
+attribute behind it: HTS Number (`hts_number`), Fit Scale # (`fit_scale`) and the six measurements (`inseam`,
+`front_rise`, `back_rise`, `cfl_length`, `hps_length`, `strap_length`, in inches as `3.25` or `3 1/4`) sit in Design &
+Tech, and Wholesale $ (`wholesale_price`) sits in Merch so the team can enter and import it (the Cost group is
+ERP-only). On an existing database, run the "[PIM] Bootstrap" job (or `python -m pim.cli seed`) once after deploy to add them. API: `POST /api/setup-file` (JSON `styles`, `entity_ids` or `view_id`) and
 `POST /api/setup-file/fill` (multipart `file`, `keep_file_values`); both return the .xlsx with a JSON summary in the
 `X-Setup-File-Summary` header.
 

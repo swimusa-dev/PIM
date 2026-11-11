@@ -48,7 +48,9 @@ def _enrich(session, meta, admin):
                       "fabric_sustainability": "Plant-based polyamide.", "fabric_care": "hand_wash_cold_dry_flat"}.items():
         assert set_value(session, meta, admin, pseudo, meta.attributes[code], val).outcome == "approved", code
     for code, val in {"product_name": "BioSculpt Bralette Top", "collection": "BioSculpt Solids",
-                      "product_description": "<p>Designed to flatter.</p><ul><li>Removable cups</li></ul>"}.items():
+                      "product_description": "<p>Designed to flatter.</p><ul><li>Removable cups</li></ul>",
+                      "hts_number": "6112.41.0010", "wholesale_price": 57.5, "fit_scale": 80, "front_rise": "3 1/4",
+                      "strap_length": "12.5", "inseam": {"not_applicable": True}}.items():
         assert set_value(session, meta, admin, st, meta.attributes[code], val).outcome == "approved", code
     # Fit details is the legacy combined field: deprecated for edits, still filled by the Shopify import.
     set_value(session, meta, admin, st, meta.attributes["fit_details"], "• Over the shoulder straps\n• Model is wearing a size small",
@@ -127,10 +129,22 @@ def test_new_setup_file_from_pim(session, ingested, meta, admin):
     ecb = next(r for r in rows if r["Color Code"] == "ECB")
     assert ecb["Style Name"] == "BioSculpt Bralette Top"  # style-level values reach every color
     assert ecb["Color/Print"] == "ECO BLACK"  # the ERP color description when there is no customer-facing name
-    report = wb[REPORT_SHEET]
-    gaps = {r[0].value: r[1].value for r in report.iter_rows() if r[1].value and str(r[1].value).startswith("hts")}
-    assert gaps == {"HTS Number": "hts_number"}
-    assert set(result.summary["columns_without_pim_attribute"]) >= {"HTS Number", "Wholesale $", "Inseam"}
+    assert fvp["HTS Number"] == "6112.41.0010" and fvp["Wholesale $"] == 57.5 and fvp["Fit Scale #"] == 80
+    assert fvp["Front Rise"] == "3 1/4" and fvp["Strap Length"] == "12.5"
+    assert fvp["Inseam"] is None  # marked Not applicable for a top: left blank, never written as text
+    # Every setup file column now has a PIM attribute behind it.
+    assert result.summary["columns_without_pim_attribute"] == []
+    assert not any(r[0].value == "Setup file columns with no PIM attribute yet" for r in wb[REPORT_SHEET].iter_rows())
+
+
+def test_setup_file_attributes_validate(session, ingested, meta, admin):
+    st = session.get(ProductEntity, _sc(session, "200809", "FVP").parent_id)
+    ok = {"hts_number": "6204.62.8018", "front_rise": "3.25", "back_rise": "1/2", "wholesale_price": "76"}
+    for code, val in ok.items():
+        assert set_value(session, meta, admin, st, meta.attributes[code], val).outcome == "approved", code
+    bad = {"hts_number": "6112-41-0010", "front_rise": "3 inches", "fit_scale": "-1", "wholesale_price": "-5"}
+    for code, val in bad.items():
+        assert set_value(session, meta, admin, st, meta.attributes[code], val).outcome == "rejected", code
 
 
 def test_cost_columns_follow_cost_rights(session, ingested, meta):
@@ -159,7 +173,7 @@ def test_fill_uploaded_setup_file(session, ingested, meta, admin):
     _enrich(session, meta, admin)
     content = _setup_file([
         _row(200809, "FVP", **{"Style Name": "Old name", "HTS Number": "6112.41.0010", "Style Image": "#VALUE!",
-                                "Wholesale $": 57.5, "Fit Scale #": 80}),
+                                "Wholesale $": 57.5, "Fit Scale #": 80, "HPS Length": "24"}),
         _row("200809", "ecb"),                  # lower-case color code still matches
         _row(6000150.0, "MBU", **{"Style Name": "BioSculpt Bralette Top"}),  # not in the PIM
         _row(None, "KLP"),                       # no style number
@@ -171,14 +185,16 @@ def test_fill_uploaded_setup_file(session, ingested, meta, admin):
     wb, rows = _sheet_rows(result.content)
     fvp = rows[0]
     assert fvp["Style Name"] == "BioSculpt Bralette Top"  # PIM wins by default
-    assert fvp["HTS Number"] == "6112.41.0010" and fvp["Wholesale $"] == 57.5 and fvp["Fit Scale #"] == 80  # kept
+    assert fvp["HTS Number"] == "6112.41.0010" and fvp["Wholesale $"] == 57.5 and fvp["Fit Scale #"] == 80
+    assert fvp["HPS Length"] == "24"
     assert fvp["Style Image"] == "https://cdn.example/200809-FVP_front.jpg"
     assert fvp["Fabrication "] == "BioSculpt"  # original header spelling is left alone
     assert rows[1]["Style Name"] == "BioSculpt Bralette Top"
     assert rows[2]["Style Name"] == "BioSculpt Bralette Top" and rows[2]["Product Description"] is None  # untouched
     fvp_rep = next(r for r in result.rows if r.row == 3)
     assert "Style Name: Old name -> BioSculpt Bralette Top" in fvp_rep.changed
-    assert "HTS Number" in fvp_rep.kept and "Inseam" in fvp_rep.blank
+    assert "HPS Length" in fvp_rep.kept and "Inseam" in fvp_rep.blank  # no PIM value: the file's value stays
+    assert not any(c.startswith("HTS Number") for c in fvp_rep.changed)  # same value in both: not a change
     report = [[c for c in r] for r in wb[REPORT_SHEET].iter_rows(values_only=True)]
     assert any(r[0] == "Rows not found in the PIM" and r[1] == "6000150-MBU" for r in report)
 
