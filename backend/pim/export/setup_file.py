@@ -11,7 +11,7 @@ This module builds that file from the PIM in two ways:
   is still blank, and which setup file columns have no PIM attribute yet.
 
 The export reads the same values a channel export would: approved values only, no drafts, no unconfirmed defaults.
-Field rights apply: a user without cost rights gets blank price columns, never someone else's view.
+Field rights apply: a column whose attribute group the user cannot view comes out blank, never someone else's view.
 """
 
 from __future__ import annotations

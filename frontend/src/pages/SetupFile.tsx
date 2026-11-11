@@ -62,7 +62,7 @@ export function SetupFilePage() {
       </div>
       <p className="muted small">
         Builds the VA Product Information Setup File from approved PIM data. Drafts, unapproved AI suggestions and unconfirmed
-        defaults are left out, and price columns follow your cost rights.
+        defaults are left out.
       </p>
       <div className="two-col">
         <div className="panel">
