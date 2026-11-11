@@ -125,7 +125,6 @@ def test_new_setup_file_from_pim(session, ingested, meta, admin):
     assert fvp["Product Description"] == "Designed to flatter.\n• Removable cups"
     assert fvp["Style Image"] == "https://cdn.example/200809-FVP_front.jpg"
     assert fvp["Weight"] == 0.18 and fvp["Key Words"] == "bralette, sculpting swim"
-    assert fvp["Retail $"] is None  # the admin role has no view_cost (D-05)
     ecb = next(r for r in rows if r["Color Code"] == "ECB")
     assert ecb["Style Name"] == "BioSculpt Bralette Top"  # style-level values reach every color
     assert ecb["Color/Print"] == "ECO BLACK"  # the ERP color description when there is no customer-facing name
@@ -147,14 +146,22 @@ def test_setup_file_attributes_validate(session, ingested, meta, admin):
         assert set_value(session, meta, admin, st, meta.attributes[code], val).outcome == "rejected", code
 
 
-def test_cost_columns_follow_cost_rights(session, ingested, meta):
-    lead = make_user(session, "lead@swimusa.com", ["merch_lead"])
-    ents, _ = style_colors_for(session, lead, [("200809", "FVP")])
+def test_retail_price_is_visible_to_everyone_and_cost_is_not(session, ingested, meta, merch):
+    """D-05 as clarified 2026-11-11: pricing is visible to every role; only cost is restricted."""
+    ents, _ = style_colors_for(session, merch, [("200809", "FVP")])
     skus = session.execute(select(ProductEntity).where(ProductEntity.parent_id == ents[0].id)).scalars().all()
     for sku in skus:  # ERP-owned, so written the way the ingest writes it
         set_value(session, meta, None, sku, meta.attributes["erp_retail_msrp"], 125, source_type="erp", force=True)
-    _, rows = _sheet_rows(build_setup_workbook(session, meta, lead, ents).content)
+        set_value(session, meta, None, sku, meta.attributes["erp_standard_cost"], 9.5, source_type="erp", force=True)
+    session.flush()
+    assert meta.attributes["erp_retail_msrp"].group_code == "erp" and not meta.attributes["erp_retail_msrp"].cost_restricted
+    _, rows = _sheet_rows(build_setup_workbook(session, meta, merch, ents).content)
     assert rows[0]["Retail $"] == 125
+    from pim.services.values import resolve_cells
+
+    cells = resolve_cells(session, meta, merch, skus[:1], ["erp_retail_msrp", "erp_standard_cost"], include_drafts=False)[skus[0].id]
+    assert cells["erp_retail_msrp"]["value"] == 125
+    assert cells["erp_standard_cost"]["value"] is None and cells["erp_standard_cost"]["read_only_reason"] == "no_rights"
 
 
 def test_only_approved_values_are_exported(session, ingested, meta, admin, merch):

@@ -23,7 +23,7 @@ attributes:
   - {code: erp_gms_style_no, label: Legacy GMS style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: gms_style_no}
   - {code: erp_vendor_style, label: Vendor style number, data_type: text, level: style, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: vendor_style}
   - {code: erp_standard_cost, label: Standard Cost, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: standard_cost, unit: USD, cost_restricted: true}
-  - {code: erp_retail_msrp, label: Retail MSRP, data_type: number, level: sku, group_code: cost, source_of_truth: erp, status: confirmed, erp_column: msrp, unit: USD, cost_restricted: true}
+  - {code: erp_retail_msrp, label: Retail MSRP, data_type: number, level: sku, group_code: erp, source_of_truth: erp, status: confirmed, erp_column: msrp, unit: USD, cost_restricted: false, help_text: "Retail price. Pricing is visible to everyone; only cost is restricted (D-05)."}
 
   # ---- Style Details (PIM-owned) -----------------------------------------------------------------
   - {code: product_name, label: Product name, data_type: text, level: style, group_code: style_details, source_of_truth: pim, status: confirmed, owner_role: product_merch, validation: {max_length: 120}, example_value: Skylar Top}

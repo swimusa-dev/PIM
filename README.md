@@ -110,8 +110,8 @@ columns. It works two ways:
 
 Each workbook gets a **PIM Export Report** sheet: rows matched or not found, every cell filled, every file value the
 PIM replaced (old and new), what is still blank, and which setup file columns have no PIM attribute yet. Values follow
-the channel export rules: approved only, no drafts, no unconfirmed defaults, and Retail $ only for roles with
-`view_cost`. The same export runs from the command line:
+the channel export rules: approved only, no drafts, no unconfirmed defaults. Retail $ and Wholesale $ are pricing and
+visible to everyone; only cost is restricted (D-05). The same export runs from the command line:
 
 ```bash
 cd backend && python -m pim.cli setup-file --fill ../VA_Resort_2027_Setup_File.xlsx --out ../VA_Resort_2027_PIM.xlsx
