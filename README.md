@@ -96,6 +96,35 @@ page (GOV-04); and the resolved Mirakl and Target+ stubs point at Rithum (ARC-05
 and section 8e of the setup guide. What remains needs the workspace: the PLT-00 spikes, UC app telemetry, the group
 role mapper, and credentials for Walmart, Rithum, Air and the Shopify development store.
 
+## Product Information Setup File export
+
+The **Setup file** page (`/setup-file`) produces the VA Product Information Setup File from approved PIM data, in the
+file's own layout: a merged group row (Style Details, Production, Design & Tech, Merch, SEO, Copy) over 32 field
+columns. It works two ways:
+
+- **Fill a setup file.** Upload the file the team started. The export finds the header row, matches each row to a
+  style-color by Style # and Color Code, and writes PIM values into the matching columns. The PIM value wins by
+  default; tick "Only fill empty cells" to keep everything already typed. Columns the PIM does not hold keep the
+  file's value and are never cleared.
+- **New setup file.** Paste style numbers (`6000150`, or `6000150-MBU` for one color).
+
+Each workbook gets a **PIM Export Report** sheet: rows matched or not found, every cell filled, every file value the
+PIM replaced (old and new), what is still blank, and which setup file columns have no PIM attribute yet. Values follow
+the channel export rules: approved only, no drafts, no unconfirmed defaults, and Retail $ only for roles with
+`view_cost`. The same export runs from the command line:
+
+```bash
+cd backend && python -m pim.cli setup-file --fill ../VA_Resort_2027_Setup_File.xlsx --out ../VA_Resort_2027_PIM.xlsx
+```
+
+The column-to-attribute map is `COLUMNS` in `backend/pim/export/setup_file.py`. Every setup file column has a PIM
+attribute behind it: HTS Number (`hts_number`), Fit Scale # (`fit_scale`) and the six measurements (`inseam`,
+`front_rise`, `back_rise`, `cfl_length`, `hps_length`, `strap_length`, in inches as `3.25` or `3 1/4`) sit in Design &
+Tech, and Wholesale $ (`wholesale_price`) sits in Merch so the team can enter and import it (the Cost group is
+ERP-only). On an existing database, run the "[PIM] Bootstrap" job (or `python -m pim.cli seed`) once after deploy to add them. API: `POST /api/setup-file` (JSON `styles`, `entity_ids` or `view_id`) and
+`POST /api/setup-file/fill` (multipart `file`, `keep_file_values`); both return the .xlsx with a JSON summary in the
+`X-Setup-File-Summary` header.
+
 ## Where things stand
 
 See **[docs/requirements-coverage.md](docs/requirements-coverage.md)** for the requirement-by-requirement status
