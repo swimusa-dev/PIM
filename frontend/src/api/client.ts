@@ -164,6 +164,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+export interface SetupFileSummary {
+  file_name: string;
+  rows: number;
+  matched: number;
+  not_in_pim: string[];
+  no_key: number[];
+  cells_filled: number;
+  cells_changed: number;
+  cells_blank: number;
+  columns_without_pim_attribute: string[];
+  unmapped_headers: string[];
+  images_dropped: boolean;
+  styles_not_found?: string[];
+}
+
+export interface FileDownload {
+  blob: Blob;
+  fileName: string;
+  summary: SetupFileSummary;
+}
+
+/** For endpoints that answer with a file: returns the bytes, the file name and the X-Setup-File-Summary JSON. */
+async function downloadRequest(path: string, init: RequestInit): Promise<FileDownload> {
+  const res = await fetch(path, { ...init, credentials: "same-origin" });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // keep status text
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const fileName = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "setup_file.xlsx";
+  const summary = JSON.parse(res.headers.get("X-Setup-File-Summary") ?? "{}") as SetupFileSummary;
+  return { blob: await res.blob(), fileName, summary };
+}
+
 const get = <T>(path: string) => request<T>(path);
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
@@ -412,6 +452,18 @@ export const api = {
   },
 
   // ---- Keyed worksheets (IMP-12) ----
+  // ---- Product Information Setup File ----
+  setupFile: {
+    create: (body: { styles?: string; entity_ids?: string[]; view_id?: string }) =>
+      downloadRequest("/api/setup-file", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+    fill: (file: File, keepFileValues: boolean) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("keep_file_values", keepFileValues ? "true" : "false");
+      return downloadRequest("/api/setup-file/fill", { method: "POST", body: fd });
+    },
+  },
+
   worksheets: {
     create: (body: WorksheetCreate) => post<WorksheetCreated>("/api/worksheets", body),
     list: () => get<Worksheet[]>("/api/worksheets"),

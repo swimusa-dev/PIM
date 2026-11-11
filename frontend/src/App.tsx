@@ -14,6 +14,7 @@ import { AdminPage } from "./pages/Admin";
 import { ImportsPage } from "./pages/Imports";
 import { ImportWizardPage } from "./pages/ImportWizard";
 import { WorksheetsPage } from "./pages/Worksheets";
+import { SetupFilePage } from "./pages/SetupFile";
 import { BulkPage } from "./pages/Bulk";
 import { WorkflowsPage } from "./pages/Workflows";
 import { ComparePage } from "./pages/Compare";
@@ -43,6 +44,7 @@ export function App() {
         <Route path="/imports/new" element={<ImportWizardPage />} />
         <Route path="/imports/:id" element={<ImportWizardPage />} />
         <Route path="/worksheets" element={<WorksheetsPage />} />
+        <Route path="/setup-file" element={<SetupFilePage />} />
         <Route path="/bulk" element={<BulkPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/compare" element={<ComparePage />} />
